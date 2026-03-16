@@ -4,11 +4,12 @@ const COLS = 10, ROWS = 20;
 const TYPES = ['I','O','T','S','Z','J','L'];
 const NEXT_COUNT = 5;
 
-const COLORS = {
+window.COLORS = {
   I:'#00d4ff', O:'#ffd700', T:'#bf00ff', S:'#00e855',
   Z:'#ff1a3a', J:'#1a4fff', L:'#ff8c00',
   GHOST:'rgba(200,220,255,0.12)', GARBAGE:'#2a3a4a'
 };
+const COLORS = window.COLORS;
 
 const SHAPES = {
   I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
@@ -298,7 +299,6 @@ const GRAVITY = [1000,833,695,578,482,402,335,279,233,194,162,135,113,94,78];
 if (typeof window !== 'undefined') {
   window.TetrisEngine = TetrisEngine;
   window.SHAPES  = SHAPES;
-  window.COLORS  = COLORS;
   window.GRAVITY = GRAVITY;
   window.COLS    = COLS;
   window.ROWS    = ROWS;

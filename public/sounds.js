@@ -36,7 +36,7 @@ const SoundSystem = (() => {
     voice_tspin1:  ['vo_tspinsingle.mp3'],
     voice_tspin2:  ['vo_tspindouble.mp3'],
     voice_tspin3:  ['vo_tspintriple.mp3'],
-    voice_b2b:     ['vo_b2btets.mp3'],       // Back-to-back
+    voice_b2b:     ['vo_b2btetrs.mp3'],       // Back-to-back
     voice_hurryup: ['vo_hurryup.mp3'],       // Hurry up!
     voice_win:     ['vo_uwin.mp3'],
     voice_lose:    ['vo_ulose.mp3'],

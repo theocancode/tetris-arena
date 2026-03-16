@@ -1,11 +1,10 @@
 'use strict';
 const BLOCK = 28, PANEL = 22, MINI = 9;
-const COLORS = {
-  I:'#00d8ff', O:'#ffe000', T:'#b000ff', S:'#00cc44',
-  Z:'#ff1133', J:'#0044ff', L:'#ff8800',
+// Merge renderer-specific colour keys into the shared window.COLORS from engine.js
+Object.assign(window.COLORS, {
   GARBAGE:'#2b3d50', bg:'#080c14',
   grid:'rgba(255,255,255,0.035)', border:'rgba(100,180,255,0.12)'
-};
+});
 
 class ParticleSystem {
   constructor() { this.p = []; }
