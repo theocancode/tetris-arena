@@ -120,6 +120,7 @@ input[type=text]:focus{border-color:var(--accent);}
 </head>
 <body>
 
+
 <button id="btn-mute">🔊 SOUND</button>
 
 <!-- Landing -->
@@ -182,13 +183,1106 @@ input[type=text]:focus{border-color:var(--accent);}
 
 <div id="toast"></div>
 
-<script src="/socket.io/socket.io.js"></script>
-<script src="engine.js"></script>
-<script src="sounds.js"></script>
-<script src="renderer.js"></script>
-<script src="input.js"></script>
-<script src="game.js"></script>
-<script src="app.js"></script>
 
+<script src="/socket.io/socket.io.js"></script>
+<script src="sounds.js"></script>
+<script>
+(function() {
+'use strict';
+
+// ── ENGINE ────────────────────────────────────────────────
+
+const COLS = 10, ROWS = 20;
+const TYPES = ['I','O','T','S','Z','J','L'];
+const NEXT_COUNT = 5;
+
+window.COLORS = {
+  I:'#00d4ff', O:'#ffd700', T:'#bf00ff', S:'#00e855',
+  Z:'#ff1a3a', J:'#1a4fff', L:'#ff8c00',
+  GHOST:'rgba(200,220,255,0.12)', GARBAGE:'#2a3a4a'
+};
+const COLORS = window.COLORS;
+
+const SHAPES = {
+  I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  O:[[0,0,0,0],[0,1,1,0],[0,1,1,0],[0,0,0,0]],
+  T:[[0,1,0],[1,1,1],[0,0,0]],
+  S:[[0,1,1],[1,1,0],[0,0,0]],
+  Z:[[1,1,0],[0,1,1],[0,0,0]],
+  J:[[1,0,0],[1,1,1],[0,0,0]],
+  L:[[0,0,1],[1,1,1],[0,0,0]]
+};
+
+// SRS kick data [col_offset, row_offset]
+const KICKS_JLSTZ = [
+  [[0,0],[-1,0],[-1,-1],[0,2],[-1,2]],
+  [[0,0],[1,0],[1,1],[0,-2],[1,-2]],
+  [[0,0],[1,0],[1,1],[0,-2],[1,-2]],
+  [[0,0],[-1,0],[-1,-1],[0,2],[-1,2]],
+  [[0,0],[1,0],[1,-1],[0,2],[1,2]],
+  [[0,0],[-1,0],[-1,1],[0,-2],[-1,-2]],
+  [[0,0],[-1,0],[-1,1],[0,-2],[-1,-2]],
+  [[0,0],[1,0],[1,-1],[0,2],[1,2]]
+];
+const KICKS_I = [
+  [[0,0],[-2,0],[1,0],[-2,1],[1,-2]],
+  [[0,0],[2,0],[-1,0],[2,-1],[-1,2]],
+  [[0,0],[-1,0],[2,0],[-1,-2],[2,1]],
+  [[0,0],[1,0],[-2,0],[1,2],[-2,-1]],
+  [[0,0],[2,0],[-1,0],[2,-1],[-1,2]],
+  [[0,0],[-2,0],[1,0],[-2,1],[1,-2]],
+  [[0,0],[1,0],[-2,0],[1,2],[-2,-1]],
+  [[0,0],[-1,0],[2,0],[-1,-2],[2,1]]
+];
+const KICK_IDX = {'01':0,'10':1,'12':2,'21':3,'23':4,'32':5,'30':6,'03':7};
+
+// Line-clear -> garbage lines sent (Tetris Friends style)
+const GARBAGE_TABLE = { 1:0, 2:1, 3:2, 4:4 };
+
+function shuffle(a) {
+  for (let i = a.length-1; i > 0; i--) {
+    const j = 0|Math.random()*(i+1);
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+function rotateCW(m) {
+  const R=m.length, C=m[0].length;
+  return Array.from({length:C},(_,r)=>Array.from({length:R},(_,c)=>m[R-1-c][r]));
+}
+
+class TetrisEngine {
+  constructor() {
+    this.board     = Array.from({length:ROWS}, ()=>Array(COLS).fill(null));
+    this.queue     = [];
+    this._fillQ();
+    this.piece     = null;
+    this.hold      = null;
+    this.holdUsed  = false;
+    this.score     = 0;
+    this.lines     = 0;
+    this.level     = 1;
+    this.combo     = 0;
+    this.pendingGarbage = 0;
+    this.isDead    = false;
+    this.lockMoves = 0;
+    // Callbacks assigned by GameManager
+    this.onDead        = null;
+    this.onSendGarbage = null;
+    this._spawn();
+  }
+
+  _fillQ() {
+    while (this.queue.length < NEXT_COUNT + 2)
+      this.queue.push(...shuffle([...TYPES]));
+  }
+  _deq() {
+    const t = this.queue.shift();
+    this._fillQ();
+    return t;
+  }
+  _mkPiece(type) {
+    const shape = SHAPES[type].map(r=>[...r]);
+    const col   = type === 'O' ? 3 : type === 'I' ? 3 : 3;
+    return { type, shape, row: -1, col, rot: 0 };
+  }
+
+  _spawn() {
+    this.holdUsed = false;
+    const p = this._mkPiece(this._deq());
+    // Spawn just above visible board
+    p.row = p.type === 'I' ? -2 : -1;
+    // Centre col
+    p.col = Math.floor((COLS - p.shape[0].length) / 2);
+    if (!this._fits(p.shape, p.row, p.col)) {
+      this.isDead = true;
+      if (this.onDead) this.onDead();
+      return;
+    }
+    this.piece = p;
+    this.lockMoves = 0;
+  }
+
+  _fits(shape, row, col) {
+    for (let r = 0; r < shape.length; r++) {
+      for (let c = 0; c < shape[r].length; c++) {
+        if (!shape[r][c]) continue;
+        const nr = row + r, nc = col + c;
+        if (nr >= ROWS || nc < 0 || nc >= COLS) return false;
+        if (nr >= 0 && this.board[nr][nc]) return false;
+      }
+    }
+    return true;
+  }
+
+  ghostRow() {
+    if (!this.piece) return 0;
+    let g = this.piece.row;
+    while (this._fits(this.piece.shape, g+1, this.piece.col)) g++;
+    return g;
+  }
+
+  moveLeft()  { if (this._fits(this.piece.shape, this.piece.row, this.piece.col-1)) { this.piece.col--; this._resetLock(); return true; } return false; }
+  moveRight() { if (this._fits(this.piece.shape, this.piece.row, this.piece.col+1)) { this.piece.col++; this._resetLock(); return true; } return false; }
+  softDrop()  {
+    if (this._fits(this.piece.shape, this.piece.row+1, this.piece.col)) {
+      this.piece.row++;
+      this.score++;
+      return true;
+    }
+    return false;
+  }
+  hardDrop() {
+    let dropped = 0;
+    while (this._fits(this.piece.shape, this.piece.row+1, this.piece.col)) {
+      this.piece.row++;
+      dropped++;
+    }
+    this.score += dropped * 2;
+    this._lock();
+  }
+
+  rotate(dir) {
+    const p = this.piece;
+    let newShape = p.shape.map(r=>[...r]);
+    const times = dir === 1 ? 1 : 3;
+    for (let i = 0; i < times; i++) newShape = rotateCW(newShape);
+    const newRot = ((p.rot + dir) + 4) % 4;
+    const kicks  = p.type === 'I' ? KICKS_I : KICKS_JLSTZ;
+    const idx    = KICK_IDX[`${p.rot}${newRot}`];
+    if (idx === undefined) return;
+    for (const [dc, dr] of kicks[idx]) {
+      if (this._fits(newShape, p.row+dr, p.col+dc)) {
+        p.shape = newShape;
+        p.rot   = newRot;
+        p.col  += dc;
+        p.row  += dr;
+        this._resetLock();
+        return;
+      }
+    }
+  }
+
+  _resetLock() {
+    this.lockMoves++;
+  }
+
+  // Called each gravity tick
+  tick() {
+    if (this.isDead || !this.piece) return;
+    if (!this.softDrop()) {
+      this._lock();
+    }
+  }
+
+  _lock() {
+    const p = this.piece;
+    // Place on board
+    for (let r = 0; r < p.shape.length; r++)
+      for (let c = 0; c < p.shape[r].length; c++)
+        if (p.shape[r][c] && p.row+r >= 0)
+          this.board[p.row+r][p.col+c] = p.type;
+
+    const cleared = this._clearLines();
+
+    // Handle combo
+    if (cleared > 0) {
+      this.combo++;
+      // garbage sent
+      const g = (GARBAGE_TABLE[cleared] || 0) + (this.combo > 1 ? this.combo - 1 : 0);
+      if (g > 0 && this.onSendGarbage) this.onSendGarbage(g);
+    } else {
+      this.combo = 0;
+    }
+
+    // Push pending garbage
+    if (this.pendingGarbage > 0 && cleared === 0) {
+      this._addGarbage(this.pendingGarbage);
+      this.pendingGarbage = 0;
+    } else if (cleared > 0 && this.pendingGarbage > 0) {
+      // Clears cancel garbage
+      this.pendingGarbage = Math.max(0, this.pendingGarbage - cleared);
+    }
+
+    this.piece = null;
+    this._spawn();
+  }
+
+  _clearLines() {
+    const full = [];
+    for (let r = 0; r < ROWS; r++)
+      if (this.board[r].every(c => c !== null)) full.push(r);
+    for (const r of full) {
+      this.board.splice(r, 1);
+      this.board.unshift(Array(COLS).fill(null));
+    }
+    if (full.length) {
+      const pts = [0, 100, 300, 500, 800];
+      this.score += (pts[full.length] || 0) * this.level;
+      this.lines += full.length;
+      this.level  = Math.min(15, 1 + Math.floor(this.lines / 10));
+    }
+    return full.length;
+  }
+
+  _addGarbage(lines) {
+    const gapCol = 0|Math.random()*COLS;
+    for (let i = 0; i < lines; i++) {
+      this.board.shift();
+      const row = Array(COLS).fill('GARBAGE');
+      row[gapCol] = null;
+      this.board.push(row);
+    }
+    // Push piece up if overlapping
+    if (this.piece) {
+      while (!this._fits(this.piece.shape, this.piece.row, this.piece.col))
+        this.piece.row--;
+    }
+  }
+
+  receiveGarbage(lines) {
+    this.pendingGarbage += lines;
+  }
+
+  doHold() {
+    if (this.holdUsed || !this.piece) return;
+    this.holdUsed = true;
+    const type = this.piece.type;
+    if (this.hold) {
+      this.piece = this._mkPiece(this.hold);
+      this.piece.col = Math.floor((COLS - this.piece.shape[0].length) / 2);
+    } else {
+      this.piece = null;
+      this._spawn();
+    }
+    this.hold = type;
+  }
+
+  // Serialise board for network (colour strings or null)
+  serialiseBoard() {
+    return this.board.map(row => row.map(c => c ? COLORS[c] || '#555' : null));
+  }
+
+  // Add ghost to serialised board for rendering
+  serialiseBoardWithPiece() {
+    const out = this.board.map(row => [...row]);
+    const p = this.piece;
+    if (!p) return out;
+    const gr = this.ghostRow();
+    // ghost
+    for (let r=0;r<p.shape.length;r++)
+      for (let c=0;c<p.shape[r].length;c++)
+        if (p.shape[r][c] && gr+r>=0 && gr+r<ROWS)
+          if (!out[gr+r][p.col+c])
+            out[gr+r][p.col+c] = 'GHOST';
+    // piece
+    for (let r=0;r<p.shape.length;r++)
+      for (let c=0;c<p.shape[r].length;c++)
+        if (p.shape[r][c] && p.row+r>=0 && p.row+r<ROWS)
+          out[p.row+r][p.col+c] = p.type;
+    return out;
+  }
+}
+
+// Gravity intervals per level (ms)
+const GRAVITY = [1000,833,695,578,482,402,335,279,233,194,162,135,113,94,78];
+
+// Expose for browser modules
+if (typeof window !== 'undefined') {
+  window.TetrisEngine = TetrisEngine;
+  window.SHAPES  = SHAPES;
+  window.GRAVITY = GRAVITY;
+  window.COLS    = COLS;
+  window.ROWS    = ROWS;
+  window.NEXT_COUNT = NEXT_COUNT;
+}
+
+
+// ── RENDERER ──────────────────────────────────────────────
+const BLOCK = 28, PANEL = 22, MINI = 9;
+// Merge renderer-specific colour keys into the shared window.COLORS from engine.js
+Object.assign(window.COLORS, {
+  GARBAGE:'#2b3d50', bg:'#080c14',
+  grid:'rgba(255,255,255,0.035)', border:'rgba(100,180,255,0.12)'
+});
+
+class ParticleSystem {
+  constructor() { this.p = []; }
+  burst(x, y, color, n=12) {
+    for (let i=0;i<n;i++) {
+      const a=(Math.PI*2*i/n)+Math.random()*0.4, sp=1.5+Math.random()*3.5;
+      this.p.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1.5,life:1,
+        decay:0.03+Math.random()*0.025,sz:2+Math.random()*3,color});
+    }
+  }
+  lineClear(bx, by, rows) {
+    const cols=[COLORS.I,COLORS.O,COLORS.T,COLORS.S,COLORS.Z];
+    for (const r of rows)
+      for (let c=0;c<10;c++)
+        this.burst(bx+c*BLOCK+BLOCK/2, by+r*BLOCK+BLOCK/2, cols[c%cols.length], 4);
+  }
+  update() {
+    this.p=this.p.filter(p=>p.life>0);
+    for (const p of this.p){p.x+=p.vx;p.y+=p.vy;p.vy+=0.12;p.life-=p.decay;p.vx*=0.97;}
+  }
+  draw(ctx) {
+    for (const p of this.p){
+      ctx.save(); ctx.globalAlpha=p.life;
+      ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=4;
+      ctx.fillRect(p.x-p.sz/2,p.y-p.sz/2,p.sz,p.sz); ctx.restore();
+    }
+  }
+}
+
+function drawBlock(ctx,x,y,sz,type){
+  if(!type||type==='GHOST') return;
+  const col=COLORS[type]||type;
+  ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(x+3,y+3,sz-2,sz-2);
+  ctx.fillStyle=col; ctx.fillRect(x+1,y+1,sz-2,sz-2);
+  const g=ctx.createLinearGradient(x+1,y+1,x+1,y+sz-1);
+  g.addColorStop(0,'rgba(255,255,255,0.38)');g.addColorStop(0.4,'rgba(255,255,255,0.08)');g.addColorStop(1,'rgba(0,0,0,0.25)');
+  ctx.fillStyle=g; ctx.fillRect(x+1,y+1,sz-2,sz-2);
+  ctx.fillStyle='rgba(255,255,255,0.52)'; ctx.fillRect(x+1,y+1,sz-2,2);
+  ctx.fillStyle='rgba(255,255,255,0.22)'; ctx.fillRect(x+1,y+3,2,sz-4);
+  ctx.fillStyle='rgba(0,0,0,0.38)'; ctx.fillRect(x+1,y+sz-3,sz-2,2);
+  ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=0.5;
+  ctx.strokeRect(x+2,y+2,sz-4,sz-4);
+}
+
+function drawGhost(ctx,x,y,sz,type){
+  const col=COLORS[type]||'#fff';
+  ctx.save(); ctx.globalAlpha=0.16;
+  ctx.fillStyle=col; ctx.fillRect(x+1,y+1,sz-2,sz-2); ctx.restore();
+  ctx.strokeStyle=col; ctx.globalAlpha=0.30; ctx.lineWidth=1;
+  ctx.strokeRect(x+1.5,y+1.5,sz-3,sz-3); ctx.globalAlpha=1;
+}
+
+function drawBoard(ctx,board,ox,oy,sz,cols,rows){
+  ctx.fillStyle=COLORS.bg; ctx.fillRect(ox,oy,cols*sz,rows*sz);
+  ctx.strokeStyle=COLORS.grid; ctx.lineWidth=0.5;
+  for(let c=1;c<cols;c++){ctx.beginPath();ctx.moveTo(ox+c*sz,oy);ctx.lineTo(ox+c*sz,oy+rows*sz);ctx.stroke();}
+  for(let r=1;r<rows;r++){ctx.beginPath();ctx.moveTo(ox,oy+r*sz);ctx.lineTo(ox+cols*sz,oy+r*sz);ctx.stroke();}
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    const cell=board[r]?.[c]; if(!cell) continue;
+    if(cell==='GHOST') drawGhost(ctx,ox+c*sz,oy+r*sz,sz,'I');
+    else drawBlock(ctx,ox+c*sz,oy+r*sz,sz,cell);
+  }
+  ctx.strokeStyle=COLORS.border; ctx.lineWidth=1.5; ctx.strokeRect(ox,oy,cols*sz,rows*sz);
+}
+
+function drawPieceInBox(ctx,type,ox,oy,bw,bh,csz){
+  if(!type) return;
+  const sh=window.SHAPES[type]; if(!sh) return;
+  let r0=99,r1=-1,c0=99,c1=-1;
+  for(let r=0;r<sh.length;r++) for(let c=0;c<sh[r].length;c++)
+    if(sh[r][c]){r0=Math.min(r0,r);r1=Math.max(r1,r);c0=Math.min(c0,c);c1=Math.max(c1,c);}
+  const pw=(c1-c0+1)*csz,ph=(r1-r0+1)*csz;
+  const sx=ox+(bw-pw)/2,sy=oy+(bh-ph)/2;
+  for(let r=r0;r<=r1;r++) for(let c=c0;c<=c1;c++)
+    if(sh[r][c]) drawBlock(ctx,sx+(c-c0)*csz,sy+(r-r0)*csz,csz,type);
+}
+
+function renderMain(ctx,engine,x,y,particles){
+  const board=engine.serialiseBoardWithPiece();
+  drawBoard(ctx,board,x,y,BLOCK,10,20);
+  if(particles){particles.update();particles.draw(ctx);}
+}
+
+function renderHold(ctx,hold,holdUsed,x,y){
+  const W=PANEL*4,H=PANEL*3;
+  ctx.save(); if(holdUsed) ctx.globalAlpha=0.35;
+  roundRect(ctx,x,y,W,H,6);
+  ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fill();
+  ctx.strokeStyle=holdUsed?'rgba(255,255,255,0.06)':COLORS.border; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.font='10px "Share Tech Mono",monospace'; ctx.fillText('HOLD',x+4,y-5);
+  drawPieceInBox(ctx,hold,x,y,W,H,PANEL); ctx.restore();
+}
+
+function renderNext(ctx,queue,x,y){
+  const W=PANEL*4,bh=PANEL*3,gap=5;
+  ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.font='10px "Share Tech Mono",monospace'; ctx.fillText('NEXT',x+4,y-5);
+  for(let i=0;i<Math.min(5,queue.length);i++){
+    const by=y+i*(bh+gap);
+    roundRect(ctx,x,by,W,bh,4);
+    ctx.fillStyle=i===0?'rgba(255,255,255,0.06)':'rgba(255,255,255,0.025)'; ctx.fill();
+    drawPieceInBox(ctx,queue[i],x,by,W,bh,i===0?PANEL:PANEL-4);
+  }
+}
+
+function renderStats(ctx,score,lines,level,combo,x,y){
+  const rows=[['SCORE',String(score).padStart(7,'0')],['LINES',String(lines).padStart(5,'0')],['LEVEL',String(level)]];
+  let sy=y;
+  for(const [lbl,val] of rows){
+    ctx.fillStyle='rgba(255,255,255,0.30)'; ctx.font='9px "Share Tech Mono",monospace'; ctx.fillText(lbl,x,sy);
+    ctx.fillStyle='#fff'; ctx.font='bold 15px "Share Tech Mono",monospace'; ctx.fillText(val,x,sy+16);
+    sy+=36;
+  }
+  if(combo>1){
+    ctx.save(); ctx.fillStyle=COLORS.O; ctx.shadowColor=COLORS.O; ctx.shadowBlur=10;
+    ctx.font=`bold ${Math.min(10+combo,18)}px "Orbitron",monospace`;
+    ctx.fillText(`${combo}× COMBO`,x,sy+10); ctx.restore();
+  }
+}
+
+function renderGarbageMeter(ctx,pending,boardX,boardY){
+  const x=boardX+10*BLOCK+4,W=6,H=20*BLOCK;
+  ctx.fillStyle='rgba(255,255,255,0.04)'; ctx.fillRect(x,boardY,W,H);
+  if(pending>0){
+    const h=Math.min(pending/12,1)*H, gy=boardY+H-h;
+    const danger=pending>=6;
+    ctx.fillStyle=danger?'#ff1133':'#ff8800';
+    ctx.shadowColor=ctx.fillStyle; ctx.shadowBlur=danger?8:4;
+    ctx.fillRect(x,gy,W,h); ctx.shadowBlur=0;
+    ctx.fillStyle=danger?'#ff5566':'#ffaa44';
+    ctx.font='bold 9px "Share Tech Mono",monospace';
+    ctx.textAlign='center'; ctx.fillText(pending,x+W/2,boardY+H+12); ctx.textAlign='left';
+  }
+}
+
+function renderMini(ctx,board,name,pending,x,y,alive){
+  const W=10*MINI,H=20*MINI;
+  if(!alive){
+    ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(x,y,W,H);
+    ctx.strokeStyle='rgba(255,50,50,0.3)'; ctx.lineWidth=1; ctx.strokeRect(x,y,W,H);
+    ctx.fillStyle='rgba(255,80,80,0.6)'; ctx.font='bold 9px "Orbitron",monospace';
+    ctx.textAlign='center'; ctx.fillText('OUT',x+W/2,y+H/2+3); ctx.textAlign='left'; return;
+  }
+  ctx.fillStyle=COLORS.bg; ctx.fillRect(x,y,W,H);
+  for(let r=0;r<20;r++) for(let c=0;c<10;c++){
+    const cell=board[r]?.[c]; if(!cell) continue;
+    const col=COLORS[cell]||cell;
+    ctx.fillStyle=col; ctx.fillRect(x+c*MINI+1,y+r*MINI+1,MINI-1,MINI-1);
+    ctx.fillStyle='rgba(255,255,255,0.22)'; ctx.fillRect(x+c*MINI+1,y+r*MINI+1,MINI-1,2);
+  }
+  ctx.strokeStyle=COLORS.border; ctx.lineWidth=1; ctx.strokeRect(x,y,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(x,y+H-13,W,13);
+  ctx.fillStyle='rgba(255,255,255,0.65)'; ctx.font='7px "Share Tech Mono",monospace';
+  ctx.textAlign='center'; ctx.fillText(name.slice(0,10),x+W/2,y+H-4); ctx.textAlign='left';
+  if(pending>0){
+    const bh=Math.min(pending/8,1)*H;
+    ctx.fillStyle=pending>=4?'#ff1133':'#ff8800';
+    ctx.fillRect(x-4,y+H-bh,3,bh);
+  }
+}
+
+function renderComboFlash(ctx,combo,W,H,alpha){
+  if(alpha<=0) return;
+  const cols=[COLORS.I,COLORS.O,COLORS.T,COLORS.S,COLORS.Z,COLORS.J,COLORS.L];
+  ctx.save(); ctx.globalAlpha=alpha*0.22;
+  ctx.fillStyle=cols[(combo-1)%cols.length]; ctx.fillRect(0,0,W,H); ctx.restore();
+}
+
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+
+window.Renderer={drawBoard,renderMain,renderHold,renderNext,renderStats,
+  renderGarbageMeter,renderMini,renderComboFlash,drawPieceInBox,
+  ParticleSystem,BLOCK,PANEL,MINI,COLORS};
+
+
+// ── INPUT ─────────────────────────────────────────────────
+// Input handler with DAS (Delayed Auto Shift) and ARR (Auto Repeat Rate)
+// DAS = 133ms  ARR = 10ms  (Tetris Friends defaults)
+
+const DAS = 133;
+const ARR = 10;
+
+class InputHandler {
+  constructor(handlers) {
+    // handlers = { left, right, softDrop, hardDrop, rotCW, rotCCW, hold }
+    this.handlers = handlers;
+    this._held  = {};   // key -> { startMs, lastMs }
+    this._bound = this._onDown.bind(this);
+    this._boundU= this._onUp.bind(this);
+    this._raf   = null;
+    this.enabled = false;
+  }
+
+  enable() {
+    if (this.enabled) return;
+    this.enabled = true;
+    window.addEventListener('keydown', this._bound);
+    window.addEventListener('keyup',   this._boundU);
+    this._loop();
+  }
+
+  disable() {
+    this.enabled = false;
+    window.removeEventListener('keydown', this._bound);
+    window.removeEventListener('keyup',   this._boundU);
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+    this._held = {};
+  }
+
+  _action(key) {
+    switch(key) {
+      case 'ArrowLeft':  case 'a': this.handlers.left?.();      break;
+      case 'ArrowRight': case 'd': this.handlers.right?.();     break;
+      case 'ArrowDown':  case 's': this.handlers.softDrop?.();  break;
+      case ' ':                    this.handlers.hardDrop?.();  break;
+      case 'ArrowUp':    case 'x': this.handlers.rotCW?.();     break;
+      case 'z':          case 'Control': this.handlers.rotCCW?.(); break;
+      case 'c':          case 'Shift':   this.handlers.hold?.();    break;
+    }
+  }
+
+  _onDown(e) {
+    if (!this.enabled) return;
+    const k = e.key;
+    // Prevent browser scrolling
+    if (['ArrowLeft','ArrowRight','ArrowDown','ArrowUp',' '].includes(k)) e.preventDefault();
+    if (this._held[k]) return; // already held
+    this._held[k] = { startMs: performance.now(), lastMs: 0 };
+    this._action(k);
+  }
+  _onUp(e) { delete this._held[e.key]; }
+
+  _loop() {
+    if (!this.enabled) return;
+    this._raf = requestAnimationFrame(() => {
+      const now = performance.now();
+      for (const [key, state] of Object.entries(this._held)) {
+        // Only DAS keys (not rotation/hold/harddrop)
+        if (!['ArrowLeft','ArrowRight','ArrowDown','a','d','s'].includes(key)) continue;
+        const elapsed = now - state.startMs;
+        if (elapsed < DAS) continue;
+        if (now - state.lastMs >= ARR) {
+          state.lastMs = now;
+          this._action(key);
+        }
+      }
+      this._loop();
+    });
+  }
+}
+
+window.InputHandler = InputHandler;
+
+
+// ── GAME MANAGER ──────────────────────────────────────────
+class GameManager {
+  constructor(canvas, socket, myId, players) {
+    this.canvas   = canvas;
+    this.ctx      = canvas.getContext('2d');
+    this.socket   = socket;
+    this.myId     = myId;
+    this.players  = players;
+    this.engine   = null;
+    this.input    = null;
+    this._raf     = null;
+    this._lastTick    = 0;
+    this._lastSync    = 0;
+    this._lockTimer   = null;
+    this._LOCK_MS     = 500;
+    this._LOCK_MAX    = 15;
+    this._lastLockMoves = 0;
+    this._comboFlashAlpha = 0;
+    this._particles   = new Renderer.ParticleSystem();
+    this._lastLevel   = 1;
+    this._hurryPlayed = false;
+    this._finishPosition = 0; // track placement
+    this._totalPlayers   = players.length;
+    this._eliminated     = 0; // how many others knocked out before me
+
+    this.opponents = {};
+    for (const p of players) {
+      if (p.id !== myId)
+        this.opponents[p.id] = { board: [], name: p.name, alive: p.alive, pending: 0 };
+    }
+  }
+
+  start() {
+    SoundSystem.unlock();
+
+    // Short delay then play "GO!" sound
+    setTimeout(() => SoundSystem.play('go'), 300);
+
+    this.engine = new TetrisEngine();
+
+    // ── Patch _lock to hook sounds + particles ──────────────────
+    const origLock = this.engine._lock.bind(this.engine);
+    this.engine._lock = () => {
+      const prevLines = this.engine.lines;
+      const prevCombo = this.engine.combo;
+      origLock();
+      const cleared = this.engine.lines - prevLines;
+
+      if (cleared > 0) {
+        // SFX line clear
+        SoundSystem.play(`clear${Math.min(cleared, 4)}`);
+        // Voice callout (double/triple/tetris)
+        setTimeout(() => SoundSystem.playClearVoice(cleared), 80);
+        // Combo
+        if (this.engine.combo > 1) {
+          this._comboFlashAlpha = 0.85;
+          SoundSystem.playCombo(this.engine.combo);
+        }
+        // Particles
+        const l = this._layout();
+        const rows = [];
+        for (let r = 0; r < 20 && rows.length < cleared; r++) rows.push(r);
+        this._particles.lineClear(l.boardX, l.boardY, rows);
+      } else {
+        SoundSystem.play('lock');
+      }
+    };
+
+    this.engine.onDead = () => this._onDead();
+    this.engine.onSendGarbage = (lines) => this.socket.emit('send-garbage', { lines });
+
+    // ── Wrap moves for sounds ────────────────────────────────────
+    const origML  = this.engine.moveLeft.bind(this.engine);
+    const origMR  = this.engine.moveRight.bind(this.engine);
+    const origRot = this.engine.rotate.bind(this.engine);
+    const origHld = this.engine.doHold.bind(this.engine);
+    const origHD  = this.engine.hardDrop.bind(this.engine);
+    const origSD  = this.engine.softDrop.bind(this.engine);
+
+    this.engine.moveLeft  = () => { if (origML())  SoundSystem.play('move'); };
+    this.engine.moveRight = () => { if (origMR())  SoundSystem.play('move'); };
+    this.engine.rotate    = (d) => { origRot(d);   SoundSystem.play('rotate'); };
+    this.engine.doHold    = () => { origHld();     SoundSystem.play('hold'); };
+    this.engine.hardDrop  = () => { origHD();      SoundSystem.play('drop'); this._resetLockTimer(); };
+    this.engine.softDrop  = () => { const r = origSD(); if (!r) SoundSystem.play('fall'); return r; };
+
+    this.input = new InputHandler({
+      left:     () => this.engine.moveLeft(),
+      right:    () => this.engine.moveRight(),
+      softDrop: () => this.engine.softDrop(),
+      hardDrop: () => this.engine.hardDrop(),
+      rotCW:    () => this.engine.rotate(1),
+      rotCCW:   () => this.engine.rotate(-1),
+      hold:     () => this.engine.doHold()
+    });
+    this.input.enable();
+
+    this._lastTick  = performance.now();
+    this._lastLevel = 1;
+    this._raf = requestAnimationFrame(t => this._loop(t));
+
+    this.socket.on('board-update',      d => this._onBoardUpdate(d));
+    this.socket.on('garbage-incoming',  d => this._onGarbage(d));
+    this.socket.on('player-eliminated', d => this._onEliminated(d));
+    this.socket.on('game-over',         d => this._onGameOver(d));
+  }
+
+  stop() {
+    if (this._raf)       { cancelAnimationFrame(this._raf); this._raf = null; }
+    if (this.input)      { this.input.disable(); }
+    if (this._lockTimer) { clearTimeout(this._lockTimer); this._lockTimer = null; }
+    this.socket.off('board-update');
+    this.socket.off('garbage-incoming');
+    this.socket.off('player-eliminated');
+    this.socket.off('game-over');
+  }
+
+  _layout() {
+    const W = this.canvas.width, H = this.canvas.height;
+    const R = window.Renderer;
+    const boardW = 10 * R.BLOCK, boardH = 20 * R.BLOCK;
+    const leftW  = R.PANEL * 4 + 16;
+    const rightW = R.PANEL * 4 + 16;
+    const totalW = leftW + boardW + 20 + rightW;
+    const ox = (W - totalW) / 2;
+    const oy = Math.max(10, (H - boardH) / 2);
+    return {
+      boardX: ox + leftW + 8,
+      boardY: oy,
+      holdX:  ox,
+      holdY:  oy + 16,
+      statsX: ox,
+      statsY: oy + 16 + R.PANEL * 3 + 24,
+      nextX:  ox + leftW + 8 + boardW + 14,
+      nextY:  oy + 16,
+      oppX:   ox + leftW + 8 + boardW + 14 + R.PANEL * 4 + 16,
+      oppY:   oy,
+      W, H
+    };
+  }
+
+  _loop(ts) {
+    if (!this.engine || this.engine.isDead) return;
+    const eng   = this.engine;
+    const gravMs = GRAVITY[Math.min(eng.level - 1, GRAVITY.length - 1)];
+
+    if (ts - this._lastTick >= gravMs) { this._lastTick = ts; eng.tick(); }
+
+    // Level up sound
+    if (eng.level > this._lastLevel) {
+      this._lastLevel = eng.level;
+      SoundSystem.play('levelup');
+      // Hurry up voice at level 8+
+      if (eng.level >= 8 && !this._hurryPlayed) {
+        this._hurryPlayed = true;
+        setTimeout(() => SoundSystem.play('voice_hurryup'), 500);
+      }
+    }
+
+    // Lock delay
+    if (eng.piece && !eng._fits(eng.piece.shape, eng.piece.row + 1, eng.piece.col)) {
+      const moved = eng.lockMoves;
+      if (moved !== this._lastLockMoves) {
+        this._lastLockMoves = moved;
+        if (this._lockTimer) clearTimeout(this._lockTimer);
+        if (moved < this._LOCK_MAX) {
+          this._lockTimer = setTimeout(() => {
+            if (this.engine && !this.engine.isDead) this.engine._lock();
+          }, this._LOCK_MS);
+        } else {
+          this.engine._lock();
+        }
+      } else if (!this._lockTimer) {
+        this._lockTimer = setTimeout(() => {
+          if (this.engine && !this.engine.isDead) this.engine._lock();
+        }, this._LOCK_MS);
+      }
+    } else {
+      if (this._lockTimer) { clearTimeout(this._lockTimer); this._lockTimer = null; }
+      this._lastLockMoves = 0;
+    }
+
+    // Sync ~100ms
+    if (ts - this._lastSync > 100) {
+      this._lastSync = ts;
+      this.socket.emit('board-update', { board: eng.serialiseBoard() });
+    }
+
+    // Decay combo flash
+    if (this._comboFlashAlpha > 0)
+      this._comboFlashAlpha = Math.max(0, this._comboFlashAlpha - 0.025);
+
+    this._draw();
+    this._raf = requestAnimationFrame(t => this._loop(t));
+  }
+
+  _resetLockTimer() {
+    if (this._lockTimer) { clearTimeout(this._lockTimer); this._lockTimer = null; }
+    this._lastLockMoves = this.engine?.lockMoves ?? 0;
+  }
+
+  _draw() {
+    const ctx = this.ctx;
+    const R   = window.Renderer;
+    const eng = this.engine;
+    const l   = this._layout();
+
+    ctx.clearRect(0, 0, l.W, l.H);
+
+    // Background
+    const bg = ctx.createRadialGradient(l.W/2, l.H/2, 0, l.W/2, l.H/2, l.W * 0.7);
+    bg.addColorStop(0, '#0d1520');
+    bg.addColorStop(1, '#080c14');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, l.W, l.H);
+
+    // Combo flash
+    if (this._comboFlashAlpha > 0)
+      R.renderComboFlash(ctx, eng.combo, l.W, l.H, this._comboFlashAlpha);
+
+    // Main board + particles
+    R.renderMain(ctx, eng, l.boardX, l.boardY, this._particles);
+
+    // Garbage meter
+    R.renderGarbageMeter(ctx, eng.pendingGarbage, l.boardX, l.boardY);
+
+    // Hold
+    R.renderHold(ctx, eng.hold, eng.holdUsed, l.holdX, l.holdY);
+
+    // Stats
+    R.renderStats(ctx, eng.score, eng.lines, eng.level, eng.combo, l.statsX, l.statsY);
+
+    // Next
+    R.renderNext(ctx, eng.queue.slice(0, 5), l.nextX, l.nextY);
+
+    // Opponents
+    const oppIds = Object.keys(this.opponents);
+    const miniH  = 20 * R.MINI + 16 + 8;
+    for (let i = 0; i < oppIds.length; i++) {
+      const opp = this.opponents[oppIds[i]];
+      R.renderMini(ctx, opp.board, opp.name, opp.pending || 0, l.oppX, l.oppY + i * miniH, opp.alive);
+    }
+  }
+
+  _onBoardUpdate({ id, board }) {
+    if (this.opponents[id]) this.opponents[id].board = board;
+  }
+
+  _onGarbage({ lines }) {
+    if (this.engine && !this.engine.isDead) this.engine.receiveGarbage(lines);
+    SoundSystem.play('garbage');
+    this.canvas.style.outline = '3px solid #ff1133';
+    setTimeout(() => this.canvas.style.outline = 'none', 280);
+  }
+
+  _onEliminated({ id }) {
+    if (this.opponents[id]) {
+      this.opponents[id].alive = false;
+      // KO sound if it was caused by us (server sent it after our garbage)
+      SoundSystem.play('ko');
+      this._eliminated++;
+    }
+  }
+
+  _onDead() {
+    this.stop();
+    SoundSystem.play('lose');
+    setTimeout(() => SoundSystem.play('voice_lose'), 300);
+    this.socket.emit('player-dead');
+    window.dispatchEvent(new CustomEvent('local-dead'));
+  }
+
+  _onGameOver({ winnerId, winnerName, placement }) {
+    this.stop();
+    const iWon = winnerId === this.myId;
+    if (iWon) {
+      SoundSystem.play('win');
+      setTimeout(() => SoundSystem.play('voice_win'), 400);
+    }
+    // Play placement voice if provided
+    if (placement) {
+      setTimeout(() => SoundSystem.playPlacement(placement), 600);
+    }
+    window.dispatchEvent(new CustomEvent('game-over', {
+      detail: { winnerId, winnerName, myId: this.myId, placement }
+    }));
+  }
+}
+
+window.GameManager = GameManager;
+
+
+// ── APP ───────────────────────────────────────────────────
+
+var socket = socket || io();
+
+var myId = null;
+var roomCode = null;
+var isHost = false;
+var hostId = null;
+var players = [];
+var gm = null;
+
+function $(id) { return document.getElementById(id); }
+
+function showScreen(id) {
+  ['landing','lobby','game'].forEach(s => {
+    const el = $(s);
+    if (el) el.classList.toggle('hidden', s !== id);
+  });
+}
+
+function toast(msg, ms=2200) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+function setError(id, msg) { $(id).textContent = msg; }
+
+function rebuildPlayerList() {
+  const ul = $('player-list');
+  ul.innerHTML = '';
+  for (const p of players) {
+    const row = document.createElement('div');
+    row.className = 'player-row' + (p.id === myId ? ' you' : '');
+    const dot = document.createElement('span');
+    dot.className = 'player-dot' + (p.id === hostId ? ' host' : '');
+    const name = document.createElement('span');
+    name.className = 'player-name';
+    name.textContent = p.name;
+    const badge = document.createElement('span');
+    badge.className = 'player-badge';
+    if (p.id === myId && p.id === hostId) badge.textContent = 'YOU · HOST';
+    else if (p.id === myId) badge.textContent = 'YOU';
+    else if (p.id === hostId) badge.textContent = 'HOST';
+    row.append(dot, name, badge);
+    ul.appendChild(row);
+  }
+  $('btn-start').classList.toggle('hidden', !isHost);
+  $('waiting-msg').classList.toggle('hidden', isHost);
+}
+
+socket.on('connect', () => { myId = socket.id; });
+
+socket.on('room-created', ({ code, players: pl, isHost: h, hostId: hid }) => {
+  roomCode = code; isHost = h; hostId = hid; players = pl;
+  $('lobby-code').textContent = code;
+  rebuildPlayerList();
+  showScreen('lobby');
+});
+
+socket.on('room-joined', ({ code, players: pl, isHost: h, hostId: hid }) => {
+  roomCode = code; isHost = h; hostId = hid; players = pl;
+  $('lobby-code').textContent = code;
+  rebuildPlayerList();
+  showScreen('lobby');
+});
+
+socket.on('player-joined', ({ id, name }) => {
+  if (!players.find(p => p.id === id)) players.push({ id, name, alive: true });
+  rebuildPlayerList();
+  toast(name + ' joined');
+});
+
+socket.on('player-left', ({ id, name }) => {
+  players = players.filter(p => p.id !== id);
+  rebuildPlayerList();
+  toast((name || 'Player') + ' left');
+  if (gm && gm.opponents[id]) gm.opponents[id].alive = false;
+});
+
+socket.on('host-changed', ({ id }) => {
+  hostId = id; isHost = id === myId;
+  rebuildPlayerList();
+  if (isHost) toast('You are now the host');
+});
+
+socket.on('error-msg', msg => setError('landing-err', msg));
+
+socket.on('game-start', ({ players: pl }) => {
+  players = pl;
+  startGame();
+});
+
+socket.on('returned-to-lobby', ({ players: pl }) => {
+  players = pl;
+  if (gm) { gm.stop(); gm = null; }
+  hideOverlay();
+  $('lobby-code').textContent = roomCode;
+  rebuildPlayerList();
+  showScreen('lobby');
+});
+
+function startGame() {
+  showScreen('game');
+  hideOverlay();
+  removeBanner();
+  const canvas = $('game-canvas');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  if (gm) gm.stop();
+  gm = new GameManager(canvas, socket, myId, players);
+  gm.start();
+}
+
+window.addEventListener('local-dead', () => showBanner('ELIMINATED'));
+
+window.addEventListener('game-over', function(e) {
+  const winnerId = e.detail.winnerId;
+  const winnerName = e.detail.winnerName;
+  const mid = e.detail.myId;
+  const iWon = winnerId === mid;
+  $('ov-title').textContent = iWon ? 'WINNER!' : 'GAME OVER';
+  $('ov-title').className   = 'overlay-title ' + (iWon ? 'win' : 'lose');
+  $('ov-sub').textContent   = iWon ? 'You outlasted everyone!' : (winnerName + ' wins');
+  $('btn-rematch').classList.toggle('hidden', !isHost);
+  showOverlay();
+});
+
+function showOverlay() { $('overlay-gameover').classList.remove('hidden'); }
+function hideOverlay()  { $('overlay-gameover').classList.add('hidden'); }
+
+var _banner = null;
+function showBanner(msg) {
+  removeBanner();
+  _banner = document.createElement('div');
+  _banner.className   = 'dead-banner';
+  _banner.textContent = msg;
+  document.body.appendChild(_banner);
+  setTimeout(removeBanner, 2600);
+}
+function removeBanner() {
+  if (_banner) { _banner.remove(); _banner = null; }
+}
+
+$('btn-create').addEventListener('click', function() {
+  setError('landing-err', '');
+  var name = $('inp-name').value.trim() || 'Player';
+  socket.emit('create-room', { name: name });
+});
+
+$('btn-join').addEventListener('click', function() {
+  setError('landing-err', '');
+  var name = $('inp-name').value.trim() || 'Player';
+  var code = $('inp-code').value.trim().toUpperCase();
+  if (!code) { setError('landing-err', 'Enter a room code'); return; }
+  socket.emit('join-room', { code: code, name: name });
+});
+
+$('inp-code').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') $('btn-join').click();
+});
+$('inp-name').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') $('btn-create').click();
+});
+
+$('btn-start').addEventListener('click', function() {
+  socket.emit('start-game');
+});
+
+$('btn-leave').addEventListener('click', function() {
+  socket.disconnect();
+  socket.connect();
+  players = [];
+  showScreen('landing');
+});
+
+$('btn-rematch').addEventListener('click', function() {
+  socket.emit('return-to-lobby');
+});
+
+$('btn-back-lobby').addEventListener('click', function() {
+  socket.emit('return-to-lobby');
+});
+
+$('btn-quit').addEventListener('click', function() {
+  socket.disconnect();
+  socket.connect();
+  players = [];
+  if (gm) { gm.stop(); gm = null; }
+  hideOverlay();
+  showScreen('landing');
+});
+
+$('lobby-code').addEventListener('click', function() {
+  var url = location.origin + '?join=' + roomCode;
+  navigator.clipboard.writeText(url).then(function() { toast('Link copied!'); });
+});
+
+$('copy-hint').addEventListener('click', function() { $('lobby-code').click(); });
+
+var urlCode = new URLSearchParams(location.search).get('join');
+if (urlCode) {
+  $('inp-code').value = urlCode.toUpperCase();
+  toast('Room code ' + urlCode + ' loaded - enter your name and join!');
+}
+
+window.addEventListener('resize', function() {
+  var canvas = $('game-canvas');
+  if (!canvas || $('game').classList.contains('hidden')) return;
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+
+// Mute button
+var muted = false;
+document.getElementById('btn-mute').addEventListener('click', function() {
+  muted = !muted;
+  SoundSystem.setEnabled(!muted);
+  document.getElementById('btn-mute').textContent = muted ? '🔇 MUTED' : '🔊 SOUND';
+});
+
+SoundSystem.init();
+
+
+})();
+</script>
 </body>
 </html>
