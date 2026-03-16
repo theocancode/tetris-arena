@@ -1,4 +1,4 @@
-'use strict';
+
 const socket = io();
 
 let myId     = null;
@@ -211,3 +211,13 @@ window.addEventListener('resize', function() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
 });
+
+// Mute button
+var muted = false;
+document.getElementById('btn-mute').addEventListener('click', function() {
+  muted = !muted;
+  SoundSystem.setEnabled(!muted);
+  document.getElementById('btn-mute').textContent = muted ? '🔇 MUTED' : '🔊 SOUND';
+});
+
+SoundSystem.init();
