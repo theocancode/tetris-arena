@@ -1058,7 +1058,7 @@ window.GameManager = GameManager;
 
 // ── APP ───────────────────────────────────────────────────
 
-var socket = socket || io();
+var socket = io(); window._dbgSocket = socket; console.log("Socket created:", socket.id);
 
 var myId = null;
 var roomCode = null;
@@ -1111,7 +1111,7 @@ function rebuildPlayerList() {
 
 socket.on('connect', () => { myId = socket.id; });
 
-socket.on('room-created', ({ code, players: pl, isHost: h, hostId: hid }) => {
+socket.on('room-created', ({ code, players: pl, isHost: h, hostId: hid }) => { console.log('room-created event received', code);
   roomCode = code; isHost = h; hostId = hid; players = pl;
   $('lobby-code').textContent = code;
   rebuildPlayerList();
