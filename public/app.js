@@ -1,12 +1,12 @@
 
-const socket = io();
+var socket = socket || io();
 
-let myId     = null;
-let roomCode = null;
-let isHost   = false;
-let hostId   = null;
-let players  = [];
-let gm       = null;
+var myId = null;
+var roomCode = null;
+var isHost = false;
+var hostId = null;
+var players = [];
+var gm = null;
 
 function $(id) { return document.getElementById(id); }
 
