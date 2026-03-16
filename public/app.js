@@ -236,4 +236,4 @@ window.addEventListener('resize', () => {
   if (!canvas || $('game').classList.contains('hidden')) return;
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
-});
+
