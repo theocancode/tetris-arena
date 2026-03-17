@@ -39,21 +39,26 @@ fetch('/auth/me').then(function(r){ return r.json(); }).then(function(d){
 
 function claimProfile() {
   var u = $('claim-username');
-  if (!u) return;
+  if (!u) { alert('Error: input not found'); return; }
   var name = u.value.trim();
-  setError('claim-err', '');
-  if (!name) return setError('claim-err', 'Enter a username');
+  if (!name) { 
+    var err=$('claim-err'); if(err) err.textContent='Enter a username'; 
+    return; 
+  }
   fetch('/auth/claim', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: name })
   }).then(function(r){ return r.json(); }).then(function(d){
-    if (!d.ok) return setError('claim-err', d.error);
+    if (!d.ok) { 
+      var err=$('claim-err'); if(err) err.textContent=d.error||'Error';
+      return; 
+    }
     currentUser = d.username;
     updateAuthUI();
-    $('auth-modal').classList.add('hidden');
+    var modal=$('auth-modal'); if(modal) modal.classList.add('hidden');
     toast(d.isNew ? 'Profile created! Stats will be saved 🎉' : 'Welcome back, ' + currentUser + '! ✓');
-  });
+  }).catch(function(e){ alert('Network error: '+e.message); });
 }
 
 // ── Stats ─────────────────────────────────────────────────────────

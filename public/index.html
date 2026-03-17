@@ -424,11 +424,7 @@ input[type=text]:focus, input[type=password]:focus {
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="engine.js"></script>
 <script src="sounds.js"></script>
-<script src="renderer.js"></script>
-<script src="input.js"></script>
-<script src="game.js"></script>
 <script src="app.js"></script>
 <script>
 (function() {
@@ -876,16 +872,18 @@ function drawPieceInBox(ctx,type,ox,oy,bw,bh,csz){
     if(sh[r][c]) drawBlock(ctx,sx+(c-c0)*csz,sy+(r-r0)*csz,csz,type);
 }
 
-function renderMain(ctx,engine,x,y,particles){
+function renderMain(ctx,engine,x,y,particles,blk){
+  blk=blk||BLOCK;
   const fullBoard=engine.serialiseBoardWithPiece();
   const board=fullBoard.slice(ROWS-VISIBLE_ROWS);
-  drawBoard(ctx,board,x,y,BLOCK,10,VISIBLE_ROWS);
+  drawBoard(ctx,board,x,y,blk,10,VISIBLE_ROWS);
   if(particles){particles.update();particles.draw(ctx);}
 }
 
 // Draw TF-style countdown number in center of board
-function renderCountdown(ctx,num,x,y){
-  const cx=x+10*BLOCK/2, cy=y+VISIBLE_ROWS*BLOCK/2;
+function renderCountdown(ctx,num,x,y,blk){
+  blk=blk||BLOCK;
+  const cx=x+10*blk/2, cy=y+VISIBLE_ROWS*blk/2;
   const text=num===0?'GO!':String(num);
   const col=num===0?'rgba(180,160,100,0.85)':'rgba(220,190,80,0.9)';
   ctx.save();
@@ -943,24 +941,26 @@ function renderAttackDiamonds(ctx,diamonds){
   ctx.restore();
 }
 
-function renderHold(ctx,hold,holdUsed,x,y){
-  const W=PANEL*4,H=PANEL*3;
+function renderHold(ctx,hold,holdUsed,x,y,pnl){
+  pnl=pnl||PANEL;
+  const W=pnl*4,H=pnl*3;
   ctx.save(); if(holdUsed) ctx.globalAlpha=0.35;
   roundRect(ctx,x,y,W,H,6);
   ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fill();
   ctx.strokeStyle=holdUsed?'rgba(255,255,255,0.06)':COLORS.border; ctx.lineWidth=1; ctx.stroke();
   ctx.fillStyle='#fff'; ctx.font='bold 13px Arial Black, Arial'; ctx.fillText('HOLD',x,y-6);
-  drawPieceInBox(ctx,hold,x,y,W,H,PANEL); ctx.restore();
+  drawPieceInBox(ctx,hold,x,y,W,H,pnl); ctx.restore();
 }
 
-function renderNext(ctx,queue,x,y){
-  const W=PANEL*4,bh=PANEL*3,gap=5;
+function renderNext(ctx,queue,x,y,pnl){
+  pnl=pnl||PANEL;
+  const W=pnl*4,bh=pnl*3,gap=5;
   ctx.fillStyle='#fff'; ctx.font='bold 13px Arial Black, Arial'; ctx.fillText('NEXT',x,y-6);
   for(let i=0;i<Math.min(5,queue.length);i++){
     const by=y+i*(bh+gap);
     roundRect(ctx,x,by,W,bh,4);
     ctx.fillStyle=i===0?'rgba(255,255,255,0.06)':'rgba(255,255,255,0.025)'; ctx.fill();
-    drawPieceInBox(ctx,queue[i],x,by,W,bh,i===0?PANEL:PANEL-4);
+    drawPieceInBox(ctx,queue[i],x,by,W,bh,i===0?pnl:pnl-4);
   }
 }
 
@@ -979,8 +979,9 @@ function renderStats(ctx,score,lines,level,combo,x,y){
   }
 }
 
-function renderGarbageMeter(ctx,pending,boardX,boardY){
-  const x=boardX+10*BLOCK+4,W=6,H=20*BLOCK;
+function renderGarbageMeter(ctx,pending,boardX,boardY,blk){
+  blk=blk||BLOCK;
+  const x=boardX+10*blk+4,W=6,H=20*blk;
   ctx.fillStyle='rgba(255,255,255,0.04)'; ctx.fillRect(x,boardY,W,H);
   if(pending>0){
     const h=Math.min(pending/12,1)*H, gy=boardY+H-h;
@@ -1259,24 +1260,25 @@ class GameManager {
   _layout() {
     const W = this.canvas.width, H = this.canvas.height;
     const R = window.Renderer;
-    const boardW = 10 * R.BLOCK, boardH = 20 * R.BLOCK;
-    const leftW  = R.PANEL * 4 + 16;
-    const rightW = R.PANEL * 4 + 16;
-    const totalW = leftW + boardW + 20 + rightW;
-    const ox = (W - totalW) / 2;
+    // Scale block size so board fills 85% of screen height
+    const scale = Math.min(1, (H * 0.85) / (20 * R.BLOCK));
+    const BLK   = Math.floor(R.BLOCK * scale);
+    const PNL   = Math.floor(R.PANEL * scale);
+    const boardW = 10 * BLK, boardH = 20 * BLK;
+    const leftW  = PNL * 4 + 12;
+    const rightW = PNL * 4 + 12;
+    const totalW = leftW + boardW + 16 + rightW;
+    const ox = Math.max(10, (W - totalW) / 2);
     const oy = Math.max(10, (H - boardH) / 2);
+    // Store scaled values for renderers
+    this._BLK = BLK; this._PNL = PNL;
     return {
-      boardX: ox + leftW + 8,
-      boardY: oy,
-      holdX:  ox,
-      holdY:  oy + 16,
-      statsX: ox,
-      statsY: oy + 16 + R.PANEL * 3 + 24,
-      nextX:  ox + leftW + 8 + boardW + 14,
-      nextY:  oy + 16,
-      oppX:   ox + leftW + 8 + boardW + 14 + R.PANEL * 4 + 16,
-      oppY:   oy,
-      W, H
+      boardX: ox + leftW + 6, boardY: oy,
+      holdX: ox, holdY: oy + 16,
+      statsX: ox, statsY: oy + 16 + PNL * 3 + 20,
+      nextX: ox + leftW + 6 + boardW + 10, nextY: oy + 16,
+      oppX:  ox + leftW + 6 + boardW + 10 + PNL * 4 + 12, oppY: oy,
+      BLK, PNL, boardW, boardH, W, H
     };
   }
 
@@ -1420,19 +1422,19 @@ class GameManager {
       R.renderComboFlash(ctx, eng.combo, l.W, l.H, this._comboFlashAlpha);
 
     // Main board + particles
-    R.renderMain(ctx, eng, l.boardX, l.boardY, this._particles);
+    R.renderMain(ctx, eng, l.boardX, l.boardY, this._particles, l.BLK);
 
     // Garbage meter
-    R.renderGarbageMeter(ctx, eng.pendingGarbage, l.boardX, l.boardY);
+    R.renderGarbageMeter(ctx, eng.pendingGarbage, l.boardX, l.boardY, l.BLK);
 
     // Hold
-    R.renderHold(ctx, eng.hold, eng.holdUsed, l.holdX, l.holdY);
+    R.renderHold(ctx, eng.hold, eng.holdUsed, l.holdX, l.holdY, l.PNL);
 
     // Stats
     R.renderStats(ctx, eng.score, eng.lines, eng.level, eng.combo, l.statsX, l.statsY);
 
     // Next
-    R.renderNext(ctx, eng.queue.slice(0, 5), l.nextX, l.nextY);
+    R.renderNext(ctx, eng.queue.slice(0, 5), l.nextX, l.nextY, l.PNL);
 
     // Opponents
     const oppIds = Object.keys(this.opponents);
@@ -1453,7 +1455,7 @@ class GameManager {
 
     // Countdown overlay
     if (this._countdown >= 0) {
-      renderCountdown(ctx, this._countdown, l.boardX, l.boardY);
+      renderCountdown(ctx, this._countdown, l.boardX, l.boardY, l.BLK);
     }
   }
 
