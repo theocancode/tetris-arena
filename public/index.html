@@ -1393,6 +1393,7 @@ class GameManager {
     const ctx = this.ctx;
     const R   = window.Renderer;
     const eng = this.engine;
+    if (!eng) return;
     const l   = this._layout();
 
     ctx.clearRect(0, 0, l.W, l.H);
@@ -1422,17 +1423,21 @@ class GameManager {
     });
 
     // Combo flash
-    if (this._comboFlashAlpha > 0)
-      R.renderComboFlash(ctx, eng.combo, l.W, l.H, this._comboFlashAlpha);
+    if (this._comboFlashAlpha > 0) {
+      try { R.renderComboFlash(ctx, eng.combo, l.W, l.H, this._comboFlashAlpha); }
+      catch(e) { console.error('comboFlash error:', e.message); }
+    }
 
     // Main board + particles
-    R.renderMain(ctx, eng, l.boardX, l.boardY, this._particles, l.BLK);
+    try { R.renderMain(ctx, eng, l.boardX, l.boardY, this._particles, l.BLK); }
+    catch(e) { console.error('renderMain error:', e.message, e.stack); }
 
     // Garbage meter
     R.renderGarbageMeter(ctx, eng.pendingGarbage, l.boardX, l.boardY, l.BLK);
 
     // Hold
-    R.renderHold(ctx, eng.hold, eng.holdUsed, l.holdX, l.holdY, l.PNL);
+    try { R.renderHold(ctx, eng.hold, eng.holdUsed, l.holdX, l.holdY, l.PNL); }
+    catch(e) { console.error('renderHold error:', e.message); }
 
     // Stats
     R.renderStats(ctx, eng.score, eng.lines, eng.level, eng.combo, l.statsX, l.statsY);
