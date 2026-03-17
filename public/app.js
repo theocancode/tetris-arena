@@ -177,7 +177,12 @@ socket.on('host-changed', function(d){
   if(isHost) toast('You are now the host ⭐');
 });
 socket.on('error-msg', function(msg){ setError('landing-err',msg); });
-socket.on('game-start', function(d){ players=d.players; myKOs=0; startGame(); });
+socket.on('game-start', function(d){
+  players=d.players; myKOs=0;
+  MusicSystem.play('game');
+  setTimeout(function(){ MusicSystem.startSpeedRamp(1.35, 90000); }, 500);
+  startGame();
+});
 socket.on('returned-to-lobby', function(d){
   players=d.players;
   if(gm){gm.stop();gm=null;}

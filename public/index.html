@@ -906,7 +906,13 @@ function renderLineBanner(ctx,text,color,x,y,alpha){
   const pw=tw+28, ph=30, px=cx-pw/2;
   ctx.fillStyle=color;
   ctx.beginPath();
-  ctx.roundRect(px,by-ph/2,pw,ph,ph/2);
+  const _r=ph/2;
+  ctx.moveTo(px+_r,by-ph/2);
+  ctx.lineTo(px+pw-_r,by-ph/2); ctx.arcTo(px+pw,by-ph/2,px+pw,by,_r);
+  ctx.lineTo(px+pw,by+ph/2-_r); ctx.arcTo(px+pw,by+ph/2,px+pw-_r,by+ph/2,_r);
+  ctx.lineTo(px+_r,by+ph/2); ctx.arcTo(px,by+ph/2,px,by+ph/2-_r,_r);
+  ctx.lineTo(px,by-ph/2+_r); ctx.arcTo(px,by-ph/2,px+_r,by-ph/2,_r);
+  ctx.closePath();
   ctx.fill();
   ctx.fillStyle='#ffffff';
   ctx.fillText(text,cx,by);
@@ -1708,15 +1714,7 @@ window.addEventListener('resize', function() {
   canvas.height = window.innerHeight;
 });
 
-// Mute button
-var muted = false;
-document.getElementById('btn-mute').addEventListener('click', function() {
-  muted = !muted;
-  SoundSystem.setEnabled(!muted);
-  document.getElementById('btn-mute').textContent = muted ? '🔇 MUTED' : '🔊 SOUND';
-});
-
-SoundSystem.init();
+// Mute and SoundSystem handled by app.js
 
 
 })();
