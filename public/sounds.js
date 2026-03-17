@@ -223,3 +223,116 @@ twist:    ['fx_twist.mp3'],      // T-spin twist sound (different from rotate)
 })();
 
 window.SoundSystem = SoundSystem;
+
+// ═══════════════════════════════════════════════════════════════════
+//  Music System — separate from SFX, handles looping + speed ramp
+// ═══════════════════════════════════════════════════════════════════
+const MusicSystem = (() => {
+  let ctx = null;
+  let source = null;
+  let gainNode = null;
+  let buffer = null;
+  let currentTrack = null;
+  let startTime = 0;
+  let pauseOffset = 0;
+  let isPlaying = false;
+  let enabled = true;
+  let volume = 0.45;
+  let _rampInterval = null;
+
+  const TRACKS = {
+    lobby: '/sounds/music_lobby.mp3',
+    game:  '/sounds/music_game.mp3'
+  };
+
+  function getCtx() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      gainNode = ctx.createGain();
+      gainNode.gain.value = volume;
+      gainNode.connect(ctx.destination);
+    }
+    return ctx;
+  }
+
+  async function loadTrack(name) {
+    if (currentTrack === name && buffer) return buffer;
+    const c = getCtx();
+    const res = await fetch(TRACKS[name]);
+    const ab  = await res.arrayBuffer();
+    buffer = await c.decodeAudioData(ab);
+    currentTrack = name;
+    return buffer;
+  }
+
+  async function play(name, rate) {
+    if (!enabled) return;
+    rate = rate || 1.0;
+    stop();
+    try {
+      const c = getCtx();
+      if (c.state === 'suspended') await c.resume();
+      const buf = await loadTrack(name);
+      source = c.createBufferSource();
+      source.buffer = buf;
+      source.loop = true;
+      source.playbackRate.value = rate;
+      source.connect(gainNode);
+      source.start(0, pauseOffset);
+      startTime = c.currentTime - pauseOffset;
+      pauseOffset = 0;
+      isPlaying = true;
+    } catch(e) { console.warn('Music error:', e); }
+  }
+
+  function stop() {
+    stopRamp();
+    if (source) {
+      try {
+        pauseOffset = ctx ? (ctx.currentTime - startTime) % (buffer ? buffer.duration : 1) : 0;
+        source.stop();
+      } catch(e) {}
+      source = null;
+    }
+    isPlaying = false;
+    pauseOffset = 0; // always restart from beginning on stop
+  }
+
+  // Gradually ramp playback speed from 1.0 to maxRate over durationMs
+  function startSpeedRamp(maxRate, durationMs) {
+    stopRamp();
+    if (!source) return;
+    const startRate = 1.0;
+    const startMs   = Date.now();
+    _rampInterval = setInterval(function() {
+      if (!source) { stopRamp(); return; }
+      const elapsed = Date.now() - startMs;
+      const t = Math.min(elapsed / durationMs, 1);
+      // Ease in — slow at first, faster near end
+      const rate = startRate + (maxRate - startRate) * (t * t);
+      source.playbackRate.value = rate;
+      if (t >= 1) stopRamp();
+    }, 250);
+  }
+
+  function stopRamp() {
+    if (_rampInterval) { clearInterval(_rampInterval); _rampInterval = null; }
+  }
+
+  function setEnabled(v) {
+    enabled = v;
+    if (!v) stop();
+    else if (gainNode) gainNode.gain.value = volume;
+  }
+
+  function setVolume(v) {
+    volume = Math.max(0, Math.min(1, v));
+    if (gainNode) gainNode.gain.value = volume;
+  }
+
+  function unlock() { getCtx(); if (ctx.state === 'suspended') ctx.resume(); }
+
+  return { play, stop, startSpeedRamp, setEnabled, setVolume, unlock, isPlaying: () => isPlaying };
+})();
+
+window.MusicSystem = MusicSystem;

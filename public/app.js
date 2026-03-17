@@ -220,12 +220,14 @@ socket.on('room-created', function(d){
   var lc=$('lobby-code'); if(lc) lc.textContent=d.code;
   var rs=$('round-summary'); if(rs) rs.style.display='none';
   rebuildPlayerList(); showScreen('lobby');
+  MusicSystem.play('lobby');
 });
 socket.on('room-joined', function(d){
   roomCode=d.code; isHost=d.isHost; hostId=d.hostId; players=d.players;
   var lc=$('lobby-code'); if(lc) lc.textContent=d.code;
   var rs=$('round-summary'); if(rs) rs.style.display='none';
   rebuildPlayerList(); showScreen('lobby');
+  MusicSystem.play('lobby');
 });
 socket.on('player-joined', function(d){
   if (!players.find(function(p){ return p.id===d.id; }))
@@ -251,6 +253,7 @@ socket.on('returned-to-lobby', function(d){
   rebuildPlayerList();
   showRoundSummary(d.summary, d.roundWins);
   showScreen('lobby');
+  MusicSystem.play('lobby');
 });
 
 // ── Game ──────────────────────────────────────────────────────────
@@ -260,6 +263,10 @@ function startGame() {
   canvas.width=window.innerWidth; canvas.height=window.innerHeight;
   if(gm) gm.stop();
   gm = new GameManager(canvas, socket, myId, players);
+  // Start game music then ramp speed up over 90 seconds (1.0 → 1.35x)
+  MusicSystem.play('game').then ? 
+    MusicSystem.play('game').then(function(){ MusicSystem.startSpeedRamp(1.35, 90000); }) :
+    (MusicSystem.play('game'), setTimeout(function(){ MusicSystem.startSpeedRamp(1.35, 90000); }, 500));
   gm.start();
 }
 
@@ -315,11 +322,13 @@ on('inp-code','keydown',function(e){ if(e.key==='Enter') $('btn-join').click(); 
 on('inp-name','keydown',function(e){ if(e.key==='Enter') $('btn-create').click(); });
 on('btn-start','click',function(){ socket.emit('start-game'); });
 on('btn-leave','click',function(){
+  MusicSystem.stop();
   socket.disconnect(); socket.connect(); players=[]; showScreen('landing');
 });
 on('btn-rematch','click',function(){ socket.emit('return-to-lobby'); });
 on('btn-back-lobby','click',function(){ socket.emit('return-to-lobby'); });
 on('btn-quit','click',function(){
+  MusicSystem.stop();
   socket.disconnect(); socket.connect(); players=[];
   if(gm){ gm.stop(); gm=null; }
   hideOverlay(); showScreen('landing');
@@ -344,7 +353,10 @@ window.addEventListener('resize',function(){
 // Mute
 var muted=false;
 on('btn-mute','click',function(){
-  muted=!muted; SoundSystem.setEnabled(!muted);
+  muted=!muted;
+  SoundSystem.setEnabled(!muted);
+  MusicSystem.setEnabled(!muted);
   $('btn-mute').textContent=muted?'🔇 MUTED':'🔊 SOUND';
 });
 SoundSystem.init();
+MusicSystem.unlock();
