@@ -246,7 +246,7 @@ io.on('connection', socket => {
     }).catch(() => {});
   }
 
-  socket.on('player-dead', ({ kos }) => {
+  socket.on('player-dead', (data) => { const kos = (data||{}).kos;
     if (!room) return;
     const p = room.players.get(socket.id);
     if (p) { p.alive = false; if (p.stats) p.stats.kos = kos || 0; }
