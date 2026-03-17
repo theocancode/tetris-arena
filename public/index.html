@@ -1219,11 +1219,10 @@ class GameManager {
       rotCCW:   () => this.engine.rotate(-1),
       hold:     () => this.engine.doHold()
     });
-    this.input.enable();
+    // Input enabled AFTER countdown finishes (in _doCountdown)
 
     this._lastTick  = performance.now();
     this._lastLevel = 1;
-    this._raf = requestAnimationFrame(t => this._loop(t));
 
     this.socket.on('board-update',      d => this._onBoardUpdate(d));
     this.socket.on('garbage-incoming',  d => this._onGarbage(d));
@@ -1280,6 +1279,7 @@ class GameManager {
       else { this._cdTimer=setTimeout(()=>{
         this._countdown=-1; this._gameRunning=true;
         this._lastTick=performance.now();
+        if (this.input) this.input.enable();
       },800); }
     };
     setTimeout(tick,300);
