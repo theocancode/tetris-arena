@@ -49,8 +49,10 @@ fetch('/auth/me').then(function(r){ return r.json(); }).then(function(d){
 });
 
 function claimProfile() {
+  console.log('claimProfile called');
   var u = $('claim-username');
-  if (!u) return;
+  console.log('claim-username element:', u);
+  if (!u) return console.error('claim-username not found!');
   var name = u.value.trim();
   setError('claim-err', '');
   if (!name) return setError('claim-err', 'Enter a username');
@@ -220,7 +222,6 @@ socket.on('room-created', function(d){
   var lc=$('lobby-code'); if(lc) lc.textContent=d.code;
   var rs=$('round-summary'); if(rs) rs.style.display='none';
   rebuildPlayerList(); showScreen('lobby');
-  MusicSystem.play('lobby');
 });
 socket.on('room-joined', function(d){
   roomCode=d.code; isHost=d.isHost; hostId=d.hostId; players=d.players;
@@ -253,7 +254,6 @@ socket.on('returned-to-lobby', function(d){
   rebuildPlayerList();
   showRoundSummary(d.summary, d.roundWins);
   showScreen('lobby');
-  MusicSystem.play('lobby');
 });
 
 // ── Game ──────────────────────────────────────────────────────────
@@ -309,6 +309,7 @@ function removeBanner(){ if(_banner){ _banner.remove(); _banner=null; } }
 on('btn-create','click',function(){
   setError('landing-err','');
   var name=($('inp-name').value.trim()) || currentUser || 'Player';
+  MusicSystem.play('lobby');
   socket.emit('create-room', { name:name, username:currentUser });
 });
 on('btn-join','click',function(){
@@ -316,6 +317,7 @@ on('btn-join','click',function(){
   var name=($('inp-name').value.trim()) || currentUser || 'Player';
   var code=($('inp-code').value.trim()).toUpperCase();
   if(!code) return setError('landing-err','Enter a room code');
+  MusicSystem.play('lobby');
   socket.emit('join-room', { code:code, name:name, username:currentUser });
 });
 on('inp-code','keydown',function(e){ if(e.key==='Enter') $('btn-join').click(); });
@@ -325,8 +327,8 @@ on('btn-leave','click',function(){
   MusicSystem.stop();
   socket.disconnect(); socket.connect(); players=[]; showScreen('landing');
 });
-on('btn-rematch','click',function(){ socket.emit('return-to-lobby'); });
-on('btn-back-lobby','click',function(){ socket.emit('return-to-lobby'); });
+on('btn-rematch','click',function(){ MusicSystem.play('lobby'); socket.emit('return-to-lobby'); });
+on('btn-back-lobby','click',function(){ MusicSystem.play('lobby'); socket.emit('return-to-lobby'); });
 on('btn-quit','click',function(){
   MusicSystem.stop();
   socket.disconnect(); socket.connect(); players=[];
