@@ -16,7 +16,7 @@ const SoundSystem = (() => {
   const FILE_MAP = {
     // ── Gameplay ─────────────────────────────────────────────────
     move:     ['fx_unmve.mp3'],
-    rotate:   ['fx_twist.mp3'],
+    rotate:   ['fx_rotationlock.mp3'],
     drop:     ['fx_hrddp.mp3'],
     lock:     ['fx_lck01.mp3'],
     fall:     ['fx_fall.mp3'],       // soft-drop landing sound
@@ -60,6 +60,7 @@ const SoundSystem = (() => {
 
     // ── T-Spins ───────────────────────────────────────────────────
     tspin:    ['fx_tspin.mp3'],
+twist:    ['fx_twist.mp3'],      // T-spin twist sound (different from rotate)
 
     // ── Garbage / attacks ─────────────────────────────────────────
     garbage:  ['fx_ko_receive.mp3'],   // incoming garbage
@@ -191,15 +192,17 @@ const SoundSystem = (() => {
 
   // Play combo sound by combo count (1-7, clamps)
   function playCombo(count) {
+    // Combos 2-7 use escalating sounds
+    // In TF, combos sound like quick ascending tones
     const n = Math.min(count, 7);
-    play(`combo${n}`);
+    play('combo' + n, { vol: 0.7 });
   }
 
-  // Play voice for line count (1-4)
+  // Play voice for line count (1-4) at higher volume to cut through SFX
   function playClearVoice(lines) {
-    if (lines === 4)      play('voice_tetris');
-    else if (lines === 3) play('voice_triple');
-    else if (lines === 2) play('voice_double');
+    if (lines === 4)      play('voice_tetris', { vol: 1.2 });
+    else if (lines === 3) play('voice_triple', { vol: 1.1 });
+    else if (lines === 2) play('voice_double', { vol: 1.1 });
     // no voice for singles
   }
 

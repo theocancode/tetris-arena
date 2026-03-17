@@ -814,12 +814,13 @@ class GameManager {
 
       if (cleared > 0) {
         // SFX line clear
-        SoundSystem.play(`clear${Math.min(cleared, 4)}`);
-        // Voice callout (double/triple/tetris)
-        setTimeout(() => SoundSystem.playClearVoice(cleared), 80);
-        // Combo
-        if (this.engine.combo > 1) {
+        SoundSystem.play('clear' + Math.min(cleared, 4));
+        // Voice callout - delay slightly so it sits on top of SFX
+        setTimeout(function() { SoundSystem.playClearVoice(cleared); }, 120);
+        // Combo - only play combo sound if combo >= 2
+        if (this.engine.combo >= 2) {
           this._comboFlashAlpha = 0.85;
+          // Play combo sound at slightly lower volume to not clash
           SoundSystem.playCombo(this.engine.combo);
         }
         // Particles
