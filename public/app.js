@@ -1,90 +1,93 @@
 var socket = io();
 var myId = null, roomCode = null, isHost = false, hostId = null;
 var players = [], gm = null;
-var currentUser = null; // logged-in username or null
-var myKOs = 0;         // tracked client-side during game
+var currentUser = null;
+var myKOs = 0;
 
 function $(id) { return document.getElementById(id); }
+function on(id, evt, fn) { var el=$(id); if(el) el.addEventListener(evt,fn); }
 
 function showScreen(id) {
-  ['landing','lobby','game','stats-screen'].forEach(s => {
-    var el = $(s);
-    if (el) el.classList.toggle('hidden', s !== id);
+  ['landing','lobby','game','stats-screen'].forEach(function(s) {
+    var el=$(s); if(el) el.classList.toggle('hidden', s!==id);
   });
 }
 function toast(msg, ms) {
-  var t = $('toast'); ms = ms||2200;
-  t.textContent = msg; t.classList.add('show');
+  var t=$('toast'); ms=ms||2200;
+  t.textContent=msg; t.classList.add('show');
   clearTimeout(toast._t);
-  toast._t = setTimeout(function(){ t.classList.remove('show'); }, ms);
+  toast._t=setTimeout(function(){ t.classList.remove('show'); }, ms);
 }
-function setError(id, msg) { $(id).textContent = msg; }
+function setError(id, msg) { var el=$(id); if(el) el.textContent=msg; }
 
-// ── Auth ──────────────────────────────────────────────────────────
+// ── Auth: claim username ──────────────────────────────────────────
 function updateAuthUI() {
   if (currentUser) {
-    $('logged-in-bar').classList.remove('hidden');
-    $('not-logged-note').classList.add('hidden');
-    $('logged-in-name').textContent = '👤 ' + currentUser;
+    var bar = $('logged-in-bar');
+    var note = $('not-logged-note');
+    var nm = $('logged-in-name');
+    if(bar)  bar.classList.remove('hidden');
+    if(note) note.classList.add('hidden');
+    if(nm)   nm.textContent = '👤 ' + currentUser;
+    // Pre-fill name input with username
+    var inp = $('inp-name');
+    if(inp && !inp.value) inp.value = currentUser;
   } else {
-    $('logged-in-bar').classList.add('hidden');
-    $('not-logged-note').classList.remove('hidden');
+    var bar = $('logged-in-bar');
+    var note = $('not-logged-note');
+    if(bar)  bar.classList.add('hidden');
+    if(note) note.classList.remove('hidden');
   }
 }
 
+// Check if already logged in from session
 fetch('/auth/me').then(function(r){ return r.json(); }).then(function(d){
-  if (d.username) { currentUser = d.username; updateAuthUI(); }
+  if (d.username) {
+    currentUser = d.username;
+    updateAuthUI();
+  }
 });
 
-function doLogin() {
-  var u = $('auth-username').value.trim();
-  var p = $('auth-password').value;
-  setError('auth-err','');
-  fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ username:u, password:p }) })
-  .then(function(r){ return r.json(); }).then(function(d){
-    if (!d.ok) return setError('auth-err', d.error);
+function claimProfile() {
+  var u = $('claim-username');
+  if (!u) return;
+  var name = u.value.trim();
+  setError('claim-err', '');
+  if (!name) return setError('claim-err', 'Enter a username');
+
+  fetch('/auth/claim', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: name })
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) return setError('claim-err', d.error);
     currentUser = d.username;
     updateAuthUI();
     $('auth-modal').classList.add('hidden');
-    toast('Welcome back, ' + currentUser + '!');
+    if (d.isNew) {
+      toast('Profile created for ' + currentUser + '! Stats will be saved 🎉');
+    } else {
+      toast('Welcome back, ' + currentUser + '! Stats loaded ✓');
+    }
   });
 }
 
-function doRegister() {
-  var u = $('reg-username').value.trim();
-  var p = $('reg-password').value;
-  setError('reg-err','');
-  fetch('/auth/register', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ username:u, password:p }) })
-  .then(function(r){ return r.json(); }).then(function(d){
-    if (!d.ok) return setError('reg-err', d.error);
-    currentUser = d.username;
-    updateAuthUI();
-    $('auth-modal').classList.add('hidden');
-    toast('Account created! Welcome, ' + currentUser + '!');
-  });
-}
-
-$('open-auth-link').addEventListener('click', function(){ $('auth-modal').classList.remove('hidden'); });
-$('btn-close-auth').addEventListener('click', function(){ $('auth-modal').classList.add('hidden'); });
-$('btn-do-login').addEventListener('click', doLogin);
-$('btn-do-register').addEventListener('click', doRegister);
-$('auth-password').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
-$('reg-password').addEventListener('keydown', function(e){ if(e.key==='Enter') doRegister(); });
-
-$('tab-login').addEventListener('click', function(){
-  $('tab-login').classList.add('active'); $('tab-register').classList.remove('active');
-  $('panel-login').classList.add('active'); $('panel-register').classList.remove('active');
+on('open-auth-link', 'click', function(){
+  $('auth-modal').classList.remove('hidden');
+  // Pre-fill with current name input if any
+  var nameInp = $('inp-name');
+  var claimInp = $('claim-username');
+  if(nameInp && claimInp && nameInp.value) claimInp.value = nameInp.value;
 });
-$('tab-register').addEventListener('click', function(){
-  $('tab-register').classList.add('active'); $('tab-login').classList.remove('active');
-  $('panel-register').classList.add('active'); $('panel-login').classList.remove('active');
-});
+on('btn-close-auth', 'click', function(){ $('auth-modal').classList.add('hidden'); });
+on('btn-do-claim', 'click', claimProfile);
+on('claim-username', 'keydown', function(e){ if(e.key==='Enter') claimProfile(); });
 
-$('btn-logout').addEventListener('click', function(){
+on('btn-logout', 'click', function(){
   fetch('/auth/logout', { method:'POST' }).then(function(){
-    currentUser = null; updateAuthUI(); toast('Logged out');
+    currentUser = null;
+    updateAuthUI();
+    toast('Logged out');
   });
 });
 
@@ -94,88 +97,119 @@ function showStats() {
   loadMyStats();
   loadLeaderboard();
 }
+
 function loadMyStats() {
+  var grid = $('stats-grid');
+  var title = $('stats-title');
   if (!currentUser) {
-    $('stats-grid').innerHTML = '<p style="color:var(--muted);font-size:.75rem;text-align:center;padding:20px">Sign in to track your stats</p>';
+    if(grid) grid.innerHTML = '<p style="color:var(--muted);font-size:.8rem;text-align:center;padding:24px;grid-column:1/-1">Save your profile to track stats!</p>';
     return;
   }
-  $('stats-title').textContent = currentUser.toUpperCase() + ' · STATS';
+  if(title) title.textContent = currentUser.toUpperCase();
   fetch('/stats/' + currentUser).then(function(r){ return r.json(); }).then(function(d){
-    if (!d.ok) return;
+    if (!d.ok || !grid) return;
     var s = d.stats;
     var winRate = s.games_played > 0 ? Math.round(s.wins/s.games_played*100) : 0;
-    var grid = [
-      { label:'Games Played', val: s.games_played, accent: false },
+    var items = [
+      { label:'Games Played', val: s.games_played },
       { label:'Win Rate',     val: winRate + '%',  accent: true },
-      { label:'Total Wins',   val: s.wins,          accent: true },
-      { label:'Total KOs',    val: s.kos,           accent: false },
-      { label:'Lines Sent',   val: s.lines_sent,    accent: false },
-      { label:'Lines Cleared',val: s.lines_cleared, accent: false },
+      { label:'Wins',         val: s.wins,          accent: true },
+      { label:'KOs',          val: s.kos },
+      { label:'Lines Sent',   val: s.lines_sent },
+      { label:'Lines Cleared',val: s.lines_cleared },
       { label:'Best LPM',     val: s.best_lpm.toFixed(1), accent: true },
-      { label:'Time Played',  val: formatTime(s.total_seconds), accent: false },
+      { label:'Time Played',  val: fmtTime(s.total_seconds) },
     ];
-    $('stats-grid').innerHTML = grid.map(function(g){
+    grid.innerHTML = items.map(function(g){
       return '<div class="stat-box"><div class="stat-label">' + g.label + '</div>' +
         '<div class="stat-value' + (g.accent?' accent':'') + '">' + g.val + '</div></div>';
     }).join('');
   });
 }
+
 function loadLeaderboard() {
+  var list = $('leaderboard-list');
+  if(!list) return;
   fetch('/leaderboard').then(function(r){ return r.json(); }).then(function(d){
     if (!d.ok) return;
     var medals = ['🥇','🥈','🥉'];
-    $('leaderboard-list').innerHTML = d.rows.map(function(r, i){
+    list.innerHTML = d.rows.map(function(r, i){
       return '<div class="leaderboard-row">' +
-        '<span class="lb-rank ' + (i===0?'gold':i===1?'silver':i===2?'bronze':'') + '">' + (medals[i]||i+1) + '</span>' +
+        '<span class="lb-rank">' + (medals[i]||'#'+(i+1)) + '</span>' +
         '<span class="lb-name">' + r.username + '</span>' +
         '<span class="lb-stat">' + r.wins + 'W · ' + r.kos + ' KOs</span>' +
         '<span class="lb-stat" style="margin-left:8px">' + r.best_lpm.toFixed(1) + ' LPM</span>' +
         '</div>';
-    }).join('') || '<p style="color:var(--muted);text-align:center;padding:16px;font-size:.75rem">No games played yet</p>';
+    }).join('') || '<p style="color:var(--muted);text-align:center;padding:20px;font-size:.75rem">No games yet!</p>';
   });
 }
-function formatTime(secs) {
+
+function fmtTime(secs) {
   if (!secs) return '0m';
-  var h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
-  return h > 0 ? h+'h '+m+'m' : m+'m';
+  var h=Math.floor(secs/3600), m=Math.floor((secs%3600)/60);
+  return h>0 ? h+'h '+m+'m' : m+'m';
 }
 
-// Tab switching in stats screen
 document.querySelectorAll('.tab-btn').forEach(function(btn){
   btn.addEventListener('click', function(){
     document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
     document.querySelectorAll('.tab-content').forEach(function(c){ c.classList.remove('active'); });
     btn.classList.add('active');
-    $('tab-'+btn.dataset.tab).classList.add('active');
+    var tc = $('tab-'+btn.dataset.tab);
+    if(tc) tc.classList.add('active');
   });
 });
 
-$('btn-view-stats').addEventListener('click', showStats);
-$('btn-close-stats').addEventListener('click', function(){ showScreen('landing'); });
+on('btn-view-stats', 'click', showStats);
+on('btn-close-stats', 'click', function(){ showScreen('landing'); });
 
 // ── Lobby ─────────────────────────────────────────────────────────
 function rebuildPlayerList() {
   var ul = $('player-list');
+  if(!ul) return;
   ul.innerHTML = '';
   for (var i=0; i<players.length; i++) {
     var p = players[i];
     var row = document.createElement('div');
     row.className = 'player-row' + (p.id===myId?' you':'');
     var dot = document.createElement('span');
-    dot.className = 'player-dot' + (p.id===hostId?' host':'');
+    dot.className = 'player-dot' + (p.id===hostId?' host':p.id===myId?' you':'');
     var name = document.createElement('span');
     name.className = 'player-name';
     name.textContent = p.name;
     var badge = document.createElement('span');
     badge.className = 'player-badge';
     if (p.id===myId && p.id===hostId) badge.textContent = 'YOU · HOST';
-    else if (p.id===myId) badge.textContent = 'YOU';
+    else if (p.id===myId)   badge.textContent = 'YOU';
     else if (p.id===hostId) badge.textContent = 'HOST';
     row.append(dot, name, badge);
     ul.appendChild(row);
   }
-  $('btn-start').classList.toggle('hidden', !isHost);
-  $('waiting-msg').classList.toggle('hidden', isHost);
+  var startBtn = $('btn-start');
+  var waitMsg  = $('waiting-msg');
+  if(startBtn) startBtn.classList.toggle('hidden', !isHost);
+  if(waitMsg)  waitMsg.classList.toggle('hidden', isHost);
+}
+
+function showRoundSummary(summary, roundWins) {
+  var box  = $('round-summary');
+  var rows = $('summary-rows');
+  if (!box || !rows || !summary) return;
+  var entries = Object.values(summary).sort(function(a,b){
+    return (b.wins||0) - (a.wins||0);
+  });
+  rows.innerHTML = entries.map(function(p, i) {
+    var crown = i===0 ? '👑' : '  ';
+    return '<div class="summary-row">' +
+      '<span class="summary-crown">' + crown + '</span>' +
+      '<span class="summary-name">' + p.name + '</span>' +
+      '<span class="summary-stat">Wins: <span>' + (p.wins||0) + '</span></span>' +
+      '<span class="summary-stat">KOs: <span>' + (p.kos||0) + '</span></span>' +
+      '<span class="summary-stat">↑ <span>' + (p.linesSent||0) + '</span></span>' +
+      '<span class="summary-stat">↓ <span>' + (p.linesReceived||0) + '</span></span>' +
+    '</div>';
+  }).join('');
+  box.style.display = 'block';
 }
 
 // ── Socket ────────────────────────────────────────────────────────
@@ -183,152 +217,134 @@ socket.on('connect', function(){ myId = socket.id; });
 
 socket.on('room-created', function(d){
   roomCode=d.code; isHost=d.isHost; hostId=d.hostId; players=d.players;
-  $('lobby-code').textContent=d.code; rebuildPlayerList(); showScreen('lobby');
+  var lc=$('lobby-code'); if(lc) lc.textContent=d.code;
+  var rs=$('round-summary'); if(rs) rs.style.display='none';
+  rebuildPlayerList(); showScreen('lobby');
 });
 socket.on('room-joined', function(d){
   roomCode=d.code; isHost=d.isHost; hostId=d.hostId; players=d.players;
-  $('lobby-code').textContent=d.code; rebuildPlayerList(); showScreen('lobby');
+  var lc=$('lobby-code'); if(lc) lc.textContent=d.code;
+  var rs=$('round-summary'); if(rs) rs.style.display='none';
+  rebuildPlayerList(); showScreen('lobby');
 });
 socket.on('player-joined', function(d){
-  if (!players.find(function(p){ return p.id===d.id; })) players.push({id:d.id,name:d.name,alive:true});
-  rebuildPlayerList(); toast(d.name+' joined');
+  if (!players.find(function(p){ return p.id===d.id; }))
+    players.push({id:d.id, name:d.name, alive:true});
+  rebuildPlayerList(); toast(d.name+' joined! 👋');
 });
 socket.on('player-left', function(d){
-  players=players.filter(function(p){ return p.id!==d.id; });
+  players = players.filter(function(p){ return p.id!==d.id; });
   rebuildPlayerList(); toast((d.name||'Player')+' left');
-  if (gm && gm.opponents[d.id]) gm.opponents[d.id].alive=false;
+  if(gm && gm.opponents[d.id]) gm.opponents[d.id].alive=false;
 });
 socket.on('host-changed', function(d){
   hostId=d.id; isHost=d.id===myId; rebuildPlayerList();
-  if (isHost) toast('You are now the host');
+  if(isHost) toast('You are now the host ⭐');
 });
 socket.on('error-msg', function(msg){ setError('landing-err', msg); });
 socket.on('game-start', function(d){ players=d.players; myKOs=0; startGame(); });
 socket.on('returned-to-lobby', function(d){
   players=d.players;
-  if (gm){ gm.stop(); gm=null; }
+  if(gm){ gm.stop(); gm=null; }
   hideOverlay();
-  $('lobby-code').textContent=roomCode;
+  var lc=$('lobby-code'); if(lc) lc.textContent=roomCode;
   rebuildPlayerList();
-  if (d.summary) showRoundSummary(d.summary, d.roundWins || {});
+  showRoundSummary(d.summary, d.roundWins);
   showScreen('lobby');
 });
 
-function showRoundSummary(summary, roundWins) {
-  var box = $('round-summary');
-  var rows = $('summary-rows');
-  if (!box || !rows) return;
-  var entries = Object.values(summary).sort(function(a,b){ return (roundWins[b.id]||b.wins||0) - (roundWins[a.id]||a.wins||0); });
-  rows.innerHTML = entries.map(function(p) {
-    var wins = roundWins[p.name] || p.wins || 0;
-    return '<div class="summary-row">' +
-      '<span class="summary-crown">' + (wins > 0 ? '👑' : '  ') + '</span>' +
-      '<span class="summary-name">' + p.name + '</span>' +
-      '<span class="summary-stat">Wins: <span>' + wins + '</span></span>' +
-      '<span class="summary-stat">KOs: <span>' + (p.kos||0) + '</span></span>' +
-      '<span class="summary-stat">Sent: <span>' + (p.linesSent||0) + '</span></span>' +
-      '<span class="summary-stat">Got: <span>' + (p.linesReceived||0) + '</span></span>' +
-    '</div>';
-  }).join('');
-  box.style.display = 'block';
-}
-
 // ── Game ──────────────────────────────────────────────────────────
 function startGame() {
-  showScreen('game');
-  hideOverlay(); removeBanner();
-  var canvas = $('game-canvas');
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  if (gm) gm.stop();
+  showScreen('game'); hideOverlay(); removeBanner();
+  var canvas=$('game-canvas');
+  canvas.width=window.innerWidth; canvas.height=window.innerHeight;
+  if(gm) gm.stop();
   gm = new GameManager(canvas, socket, myId, players);
   gm.start();
 }
 
 window.addEventListener('local-dead', function(){
   showBanner('ELIMINATED');
-  // Emit stats
-  if (gm) {
-    socket.emit('player-dead', { kos: myKOs });
-    socket.emit('lines-cleared', { total: gm.engine ? gm.engine.lines : 0 });
-  }
+  socket.emit('player-dead', { kos: myKOs });
+  if(gm) socket.emit('lines-cleared', { total: gm.engine ? gm.engine.lines : 0 });
 });
 
 window.addEventListener('game-over', function(e){
-  var d = e.detail;
+  var d=e.detail;
   var iWon = d.winnerId === d.myId;
-  $('ov-title').textContent = iWon ? 'WINNER!' : 'GAME OVER';
-  $('ov-title').className = 'overlay-title ' + (iWon?'win':'lose');
-  $('ov-sub').textContent = iWon ? 'You outlasted everyone!' : (d.winnerName+' wins');
-  $('btn-rematch').classList.toggle('hidden', !isHost);
-  if (iWon) socket.emit('game-won', { kos: myKOs });
+  var title=$('ov-title'), sub=$('ov-sub'), rematch=$('btn-rematch');
+  if(title){ title.textContent = iWon ? '🏆 WINNER!' : 'GAME OVER'; title.className='overlay-title '+(iWon?'win':'lose'); }
+  if(sub)   sub.textContent = iWon ? 'You outlasted everyone!' : (d.winnerName+' wins!');
+  if(rematch) rematch.classList.toggle('hidden', !isHost);
+  if(iWon) socket.emit('game-won', { kos: myKOs });
   showOverlay();
 });
 
-window.addEventListener('player-ko', function(e){
+window.addEventListener('player-ko', function(){
   myKOs++;
-  if (gm) socket.emit('lines-cleared', { total: gm.engine ? gm.engine.lines : 0 });
+  if(gm) socket.emit('lines-cleared', { total: gm.engine ? gm.engine.lines : 0 });
 });
 
-function showOverlay() { $('overlay-gameover').classList.remove('hidden'); }
-function hideOverlay()  { $('overlay-gameover').classList.add('hidden'); }
+function showOverlay(){ var o=$('overlay-gameover'); if(o) o.classList.remove('hidden'); }
+function hideOverlay(){ var o=$('overlay-gameover'); if(o) o.classList.add('hidden'); }
 
-var _banner = null;
-function showBanner(msg) {
+var _banner=null;
+function showBanner(msg){
   removeBanner();
-  _banner = document.createElement('div');
-  _banner.className = 'dead-banner'; _banner.textContent = msg;
+  _banner=document.createElement('div');
+  _banner.className='dead-banner'; _banner.textContent=msg;
   document.body.appendChild(_banner);
   setTimeout(removeBanner, 2600);
 }
-function removeBanner() { if (_banner){ _banner.remove(); _banner=null; } }
+function removeBanner(){ if(_banner){ _banner.remove(); _banner=null; } }
 
 // ── Buttons ───────────────────────────────────────────────────────
-$('btn-create').addEventListener('click', function(){
+on('btn-create','click',function(){
   setError('landing-err','');
-  var name = $('inp-name').value.trim() || currentUser || 'Player';
-  socket.emit('create-room', { name: name, username: currentUser });
+  var name=($('inp-name').value.trim()) || currentUser || 'Player';
+  socket.emit('create-room', { name:name, username:currentUser });
 });
-$('btn-join').addEventListener('click', function(){
+on('btn-join','click',function(){
   setError('landing-err','');
-  var name = $('inp-name').value.trim() || currentUser || 'Player';
-  var code = $('inp-code').value.trim().toUpperCase();
-  if (!code) return setError('landing-err','Enter a room code');
-  socket.emit('join-room', { code: code, name: name, username: currentUser });
+  var name=($('inp-name').value.trim()) || currentUser || 'Player';
+  var code=($('inp-code').value.trim()).toUpperCase();
+  if(!code) return setError('landing-err','Enter a room code');
+  socket.emit('join-room', { code:code, name:name, username:currentUser });
 });
-$('inp-code').addEventListener('keydown', function(e){ if(e.key==='Enter') $('btn-join').click(); });
-$('inp-name').addEventListener('keydown', function(e){ if(e.key==='Enter') $('btn-create').click(); });
-$('btn-start').addEventListener('click', function(){ socket.emit('start-game'); });
-$('btn-leave').addEventListener('click', function(){
+on('inp-code','keydown',function(e){ if(e.key==='Enter') $('btn-join').click(); });
+on('inp-name','keydown',function(e){ if(e.key==='Enter') $('btn-create').click(); });
+on('btn-start','click',function(){ socket.emit('start-game'); });
+on('btn-leave','click',function(){
   socket.disconnect(); socket.connect(); players=[]; showScreen('landing');
 });
-$('btn-rematch').addEventListener('click', function(){ socket.emit('return-to-lobby'); });
-$('btn-back-lobby').addEventListener('click', function(){ socket.emit('return-to-lobby'); });
-$('btn-quit').addEventListener('click', function(){
+on('btn-rematch','click',function(){ socket.emit('return-to-lobby'); });
+on('btn-back-lobby','click',function(){ socket.emit('return-to-lobby'); });
+on('btn-quit','click',function(){
   socket.disconnect(); socket.connect(); players=[];
-  if (gm){ gm.stop(); gm=null; }
+  if(gm){ gm.stop(); gm=null; }
   hideOverlay(); showScreen('landing');
 });
-$('lobby-code').addEventListener('click', function(){
-  navigator.clipboard.writeText(location.origin+'?join='+roomCode).then(function(){ toast('Link copied!'); });
+on('lobby-code','click',function(){
+  navigator.clipboard.writeText(location.origin+'?join='+roomCode)
+    .then(function(){ toast('Invite link copied! 📋'); });
 });
-$('copy-hint').addEventListener('click', function(){ $('lobby-code').click(); });
+on('copy-hint','click',function(){ var lc=$('lobby-code'); if(lc) lc.click(); });
 
-var urlCode = new URLSearchParams(location.search).get('join');
-if (urlCode) {
-  $('inp-code').value = urlCode.toUpperCase();
-  toast('Room code '+urlCode+' loaded — enter name and join!');
+var urlCode=new URLSearchParams(location.search).get('join');
+if(urlCode){
+  var ci=$('inp-code'); if(ci) ci.value=urlCode.toUpperCase();
+  toast('Room code '+urlCode+' ready — enter your name and join!');
 }
-window.addEventListener('resize', function(){
-  var canvas = $('game-canvas');
-  if (!canvas || $('game').classList.contains('hidden')) return;
+window.addEventListener('resize',function(){
+  var canvas=$('game-canvas');
+  if(!canvas||$('game').classList.contains('hidden')) return;
   canvas.width=window.innerWidth; canvas.height=window.innerHeight;
 });
 
 // Mute
-var muted = false;
-$('btn-mute').addEventListener('click', function(){
+var muted=false;
+on('btn-mute','click',function(){
   muted=!muted; SoundSystem.setEnabled(!muted);
-  $('btn-mute').textContent = muted ? '🔇 MUTED' : '🔊 SOUND';
+  $('btn-mute').textContent=muted?'🔇 MUTED':'🔊 SOUND';
 });
 SoundSystem.init();

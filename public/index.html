@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tetris Arena</title>
+<title>Tetris Friends</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
 <style>
@@ -312,8 +312,8 @@ input[type=text]:focus, input[type=password]:focus {
 <!-- Landing -->
 <div id="landing" class="screen">
   <div class="logo-wrap">
-    <div class="logo"><span>T</span><span>E</span><span>T</span><span>R</span><span>I</span><span>S</span>&nbsp;<span>A</span><span>R</span><span>E</span><span>N</span><span>A</span></div>
-    <div class="logo-sub">MULTIPLAYER · 4 PLAYERS · REAL-TIME</div>
+    <div class="logo"><span>T</span><span>E</span><span>T</span><span>R</span><span>I</span><span>S</span>&nbsp;<span>F</span><span>R</span><span>I</span><span>E</span><span>N</span><span>D</span><span>S</span></div>
+    <div class="logo-sub">PLAY WITH YOUR FRIENDS ONLINE</div>
   </div>
   <div class="card">
     <p class="card-title">Enter the Arena</p>
@@ -322,7 +322,7 @@ input[type=text]:focus, input[type=password]:focus {
       <input type="text" id="inp-name" maxlength="16" placeholder="Player">
     </div>
     <div id="auth-bar">
-    <div class="logged-out-note" id="not-logged-note">Play as guest or <span style="color:var(--accent);cursor:pointer" id="open-auth-link">sign in</span> to track stats</div>
+    <div class="logged-out-note" id="not-logged-note">Playing as guest — <span style="color:var(--accent);cursor:pointer" id="open-auth-link">save your profile</span> to track stats!</div>
     <div class="logged-in-bar hidden" id="logged-in-bar">
       <span class="logged-in-name" id="logged-in-name"></span>
       <button class="btn-ghost" style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);cursor:pointer;font-family:var(--mono);font-size:0.65rem;color:var(--muted)" id="btn-view-stats">MY STATS</button>
@@ -1498,28 +1498,23 @@ SoundSystem.init();
 
 <!-- Auth Modal -->
 <div id="auth-modal" class="overlay hidden">
-  <div class="card" style="width:360px">
-    <div class="auth-tabs">
-      <button class="auth-tab active" id="tab-login">Login</button>
-      <button class="auth-tab" id="tab-register">Register</button>
+  <div class="card" style="width:340px">
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:2.5rem;margin-bottom:6px">👤</div>
+      <div style="font-family:var(--title);font-size:1rem;font-weight:900;color:var(--text);letter-spacing:0.1em">SAVE YOUR PROFILE</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.5">Enter your name to save stats.<br>Next time you use the same name, your stats load automatically!</div>
     </div>
-    <div class="auth-panel active" id="panel-login">
-      <div><label>USERNAME</label><input type="text" id="auth-username" maxlength="16" placeholder="your name"></div>
-      <div><label>PASSWORD</label><input type="password" id="auth-password" placeholder="password"></div>
-      <button class="btn btn-primary" id="btn-do-login">LOGIN</button>
-      <p class="error-msg" id="auth-err"></p>
+    <div>
+      <label>YOUR NAME</label>
+      <input type="text" id="claim-username" maxlength="16" placeholder="Choose a username">
     </div>
-    <div class="auth-panel" id="panel-register">
-      <div><label>USERNAME</label><input type="text" id="reg-username" maxlength="16" placeholder="pick a name"></div>
-      <div><label>PASSWORD</label><input type="password" id="reg-password" placeholder="min 4 chars"></div>
-      <button class="btn btn-primary" id="btn-do-register">CREATE ACCOUNT</button>
-      <p class="error-msg" id="reg-err"></p>
-    </div>
-    <p class="auth-skip" id="btn-close-auth">PLAY AS GUEST INSTEAD</p>
+    <button class="btn btn-primary" id="btn-do-claim">SAVE PROFILE ✓</button>
+    <p class="error-msg" id="claim-err"></p>
+    <p class="auth-skip" id="btn-close-auth">PLAY WITHOUT SAVING STATS</p>
   </div>
 </div>
 
-<!-- Stats Screen -->
+<!-- Stats<!-- Stats Screen -->
 <div id="stats-screen" class="screen hidden">
   <div class="stats-card">
     <div style="display:flex;align-items:center;gap:12px">
