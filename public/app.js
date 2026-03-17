@@ -74,6 +74,9 @@ function claimProfile() {
   });
 }
 
+// Defer all DOM event handlers until page fully loaded
+window.addEventListener('load', function() {
+
 on('open-auth-link', 'click', function(){
   $('auth-modal').classList.remove('hidden');
   // Pre-fill with current name input if any
@@ -362,3 +365,5 @@ on('btn-mute','click',function(){
 });
 SoundSystem.init();
 MusicSystem.unlock();
+
+}); // end window.load
