@@ -742,27 +742,81 @@ class ParticleSystem {
   }
 }
 
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+  ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
+  ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+  ctx.closePath();
+}
+
 function drawBlock(ctx,x,y,sz,type){
   if(!type||type==='GHOST') return;
-  const col=COLORS[type]||type;
-  ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(x+3,y+3,sz-2,sz-2);
-  ctx.fillStyle=col; ctx.fillRect(x+1,y+1,sz-2,sz-2);
-  const g=ctx.createLinearGradient(x+1,y+1,x+1,y+sz-1);
-  g.addColorStop(0,'rgba(255,255,255,0.38)');g.addColorStop(0.4,'rgba(255,255,255,0.08)');g.addColorStop(1,'rgba(0,0,0,0.25)');
-  ctx.fillStyle=g; ctx.fillRect(x+1,y+1,sz-2,sz-2);
-  ctx.fillStyle='rgba(255,255,255,0.52)'; ctx.fillRect(x+1,y+1,sz-2,2);
-  ctx.fillStyle='rgba(255,255,255,0.22)'; ctx.fillRect(x+1,y+3,2,sz-4);
-  ctx.fillStyle='rgba(0,0,0,0.38)'; ctx.fillRect(x+1,y+sz-3,sz-2,2);
-  ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=0.5;
-  ctx.strokeRect(x+2,y+2,sz-4,sz-4);
+  const col = COLORS[type]||type;
+  const pad = 1.5;
+  const r   = sz * 0.22; // rounded corner radius — TF-style bubbly
+  const bx  = x+pad, by = y+pad, bw = sz-pad*2, bh = sz-pad*2;
+
+  // Drop shadow
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur  = 4;
+  ctx.shadowOffsetX = 1.5;
+  ctx.shadowOffsetY = 2;
+  roundedRect(ctx, bx, by, bw, bh, r);
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.restore();
+
+  // Main fill (no shadow)
+  roundedRect(ctx, bx, by, bw, bh, r);
+  ctx.fillStyle = col;
+  ctx.fill();
+
+  // Inner border — slightly darker
+  roundedRect(ctx, bx+1, by+1, bw-2, bh-2, r*0.7);
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Glossy top highlight — big ellipse in top half
+  const gx = ctx.createLinearGradient(bx, by, bx, by + bh*0.55);
+  gx.addColorStop(0,   'rgba(255,255,255,0.70)');
+  gx.addColorStop(0.5, 'rgba(255,255,255,0.22)');
+  gx.addColorStop(1,   'rgba(255,255,255,0.00)');
+  ctx.save();
+  roundedRect(ctx, bx+2, by+2, bw-4, bh*0.58, r*0.6);
+  ctx.fillStyle = gx;
+  ctx.fill();
+  ctx.restore();
+
+  // Bottom sheen — subtle lighter band
+  ctx.save();
+  roundedRect(ctx, bx+2, by+bh*0.72, bw-4, bh*0.22, r*0.3);
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawGhost(ctx,x,y,sz,type){
-  const col=COLORS[type]||'#fff';
-  ctx.save(); ctx.globalAlpha=0.16;
-  ctx.fillStyle=col; ctx.fillRect(x+1,y+1,sz-2,sz-2); ctx.restore();
-  ctx.strokeStyle=col; ctx.globalAlpha=0.30; ctx.lineWidth=1;
-  ctx.strokeRect(x+1.5,y+1.5,sz-3,sz-3); ctx.globalAlpha=1;
+  const col = COLORS[type]||'#fff';
+  const pad = 1.5, r = sz*0.22;
+  const bx = x+pad, by = y+pad, bw = sz-pad*2, bh = sz-pad*2;
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  roundedRect(ctx, bx, by, bw, bh, r);
+  ctx.fillStyle = col;
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  roundedRect(ctx, bx, by, bw, bh, r);
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawBoard(ctx,board,ox,oy,sz,cols,rows){
@@ -1089,6 +1143,10 @@ class GameManager {
     this.socket.off('board-update');
     this.socket.off('garbage-incoming');
     this.socket.off('player-eliminated');
+    // NOTE: do NOT remove game-over here — dead players still need to receive it
+  }
+  stopFull() {
+    this.stop();
     this.socket.off('game-over');
   }
 
@@ -1248,7 +1306,7 @@ class GameManager {
   }
 
   _onGameOver({ winnerId, winnerName, placement }) {
-    this.stop();
+    this.stopFull();
     const iWon = winnerId === this.myId;
     if (iWon) {
       SoundSystem.play('win');
