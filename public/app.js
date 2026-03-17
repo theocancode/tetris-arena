@@ -263,7 +263,6 @@ $('btn-close-stats').addEventListener('click', function(){ showScreen('landing')
 $('btn-create').addEventListener('click', function(){
   setError('landing-err','');
   var name=($('inp-name').value.trim())||currentUser||'Player';
-  MusicSystem.play('lobby');
   socket.emit('create-room',{name:name,username:currentUser});
 });
 $('btn-join').addEventListener('click', function(){
@@ -271,12 +270,29 @@ $('btn-join').addEventListener('click', function(){
   var name=($('inp-name').value.trim())||currentUser||'Player';
   var code=($('inp-code').value.trim()).toUpperCase();
   if(!code) return setError('landing-err','Enter a room code');
-  MusicSystem.play('lobby');
   socket.emit('join-room',{code:code,name:name,username:currentUser});
 });
 $('inp-code').addEventListener('keydown', function(e){ if(e.key==='Enter') $('btn-join').click(); });
 $('inp-name').addEventListener('keydown', function(e){ if(e.key==='Enter') $('btn-create').click(); });
 $('btn-start').addEventListener('click', function(){ socket.emit('start-game'); });
+
+// Music button - explicit user gesture to start music
+var musicStarted = false;
+$('btn-music').addEventListener('click', function(){
+  if (!musicStarted) {
+    musicStarted = true;
+    MusicSystem.play('lobby');
+    $('btn-music').textContent = '🎵 MUSIC ON';
+    $('btn-music').style.borderColor = 'var(--green)';
+    $('btn-music').style.color = 'var(--green)';
+  } else {
+    musicStarted = false;
+    MusicSystem.stop();
+    $('btn-music').textContent = '🎵 PLAY MUSIC';
+    $('btn-music').style.borderColor = '';
+    $('btn-music').style.color = '';
+  }
+});
 $('btn-leave').addEventListener('click', function(){
   MusicSystem.stop(); socket.disconnect(); socket.connect(); players=[]; showScreen('landing');
 });

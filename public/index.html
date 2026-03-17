@@ -353,6 +353,7 @@ input[type=text]:focus, input[type=password]:focus {
     <div class="player-list" id="player-list"></div>
     <p class="waiting-msg" id="waiting-msg">Waiting for players…</p>
     <button class="btn btn-green hidden" id="btn-start">▶ START GAME</button>
+    <button class="btn btn-ghost" id="btn-music" style="font-size:0.8rem">🎵 PLAY MUSIC</button>
     <button class="btn btn-ghost" id="btn-leave">Leave Room</button>
   </div>
 </div>
@@ -423,7 +424,12 @@ input[type=text]:focus, input[type=password]:focus {
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
+<script src="engine.js"></script>
 <script src="sounds.js"></script>
+<script src="renderer.js"></script>
+<script src="input.js"></script>
+<script src="game.js"></script>
+<script src="app.js"></script>
 <script>
 (function() {
 'use strict';
