@@ -384,6 +384,44 @@ input[type=text]:focus, input[type=password]:focus {
 <div id="toast"></div>
 
 
+<!-- Auth Modal -->
+<div id="auth-modal" class="overlay hidden">
+  <div class="card" style="width:340px">
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:2.5rem;margin-bottom:6px">👤</div>
+      <div style="font-family:var(--title);font-size:1rem;font-weight:900;color:var(--text);letter-spacing:0.1em">SAVE YOUR PROFILE</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.5">Enter your name to save stats.<br>Next time you use the same name, your stats load automatically!</div>
+    </div>
+    <div>
+      <label>YOUR NAME</label>
+      <input type="text" id="claim-username" maxlength="16" placeholder="Choose a username">
+    </div>
+    <button class="btn btn-primary" id="btn-do-claim">SAVE PROFILE ✓</button>
+    <p class="error-msg" id="claim-err"></p>
+    <p class="auth-skip" id="btn-close-auth">PLAY WITHOUT SAVING STATS</p>
+  </div>
+</div>
+
+<!-- Stats<!-- Stats Screen -->
+<div id="stats-screen" class="screen hidden">
+  <div class="stats-card">
+    <div style="display:flex;align-items:center;gap:12px">
+      <h2 style="font-family:var(--title);font-size:1rem;letter-spacing:0.2em;flex:1" id="stats-title">STATS</h2>
+      <button class="btn-ghost" style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:0.65rem;color:var(--muted)" id="btn-close-stats">BACK</button>
+    </div>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="my-stats">MY STATS</button>
+      <button class="tab-btn" data-tab="leaderboard">LEADERBOARD</button>
+    </div>
+    <div class="tab-content active" id="tab-my-stats">
+      <div class="stats-grid" id="stats-grid"></div>
+    </div>
+    <div class="tab-content" id="tab-leaderboard">
+      <div id="leaderboard-list"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script src="sounds.js"></script>
 <script>
@@ -1683,43 +1721,5 @@ SoundSystem.init();
 
 })();
 </script>
-
-<!-- Auth Modal -->
-<div id="auth-modal" class="overlay hidden">
-  <div class="card" style="width:340px">
-    <div style="text-align:center;margin-bottom:16px">
-      <div style="font-size:2.5rem;margin-bottom:6px">👤</div>
-      <div style="font-family:var(--title);font-size:1rem;font-weight:900;color:var(--text);letter-spacing:0.1em">SAVE YOUR PROFILE</div>
-      <div style="font-size:0.72rem;color:var(--muted);margin-top:6px;line-height:1.5">Enter your name to save stats.<br>Next time you use the same name, your stats load automatically!</div>
-    </div>
-    <div>
-      <label>YOUR NAME</label>
-      <input type="text" id="claim-username" maxlength="16" placeholder="Choose a username">
-    </div>
-    <button class="btn btn-primary" id="btn-do-claim">SAVE PROFILE ✓</button>
-    <p class="error-msg" id="claim-err"></p>
-    <p class="auth-skip" id="btn-close-auth">PLAY WITHOUT SAVING STATS</p>
-  </div>
-</div>
-
-<!-- Stats<!-- Stats Screen -->
-<div id="stats-screen" class="screen hidden">
-  <div class="stats-card">
-    <div style="display:flex;align-items:center;gap:12px">
-      <h2 style="font-family:var(--title);font-size:1rem;letter-spacing:0.2em;flex:1" id="stats-title">STATS</h2>
-      <button class="btn-ghost" style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:0.65rem;color:var(--muted)" id="btn-close-stats">BACK</button>
-    </div>
-    <div class="tab-bar">
-      <button class="tab-btn active" data-tab="my-stats">MY STATS</button>
-      <button class="tab-btn" data-tab="leaderboard">LEADERBOARD</button>
-    </div>
-    <div class="tab-content active" id="tab-my-stats">
-      <div class="stats-grid" id="stats-grid"></div>
-    </div>
-    <div class="tab-content" id="tab-leaderboard">
-      <div id="leaderboard-list"></div>
-    </div>
-  </div>
-</div>
 </body>
 </html>
