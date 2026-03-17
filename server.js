@@ -4,58 +4,20 @@ const http       = require('http');
 const { Server } = require('socket.io');
 const path       = require('path');
 const session    = require('express-session');
-const Database   = require('better-sqlite3');
 const fs         = require('fs');
 
-// ── Database ──────────────────────────────────────────────────────
+// ── Simple JSON file database (no native deps) ────────────────────
 const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_FILE = path.join(DATA_DIR, 'users.json');
 
-const db = new Database(path.join(DATA_DIR, 'arena.db'));
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    username   TEXT UNIQUE NOT NULL COLLATE NOCASE,
-    created_at INTEGER DEFAULT (unixepoch())
-  );
-  CREATE TABLE IF NOT EXISTS stats (
-    user_id        INTEGER PRIMARY KEY REFERENCES users(id),
-    games_played   INTEGER DEFAULT 0,
-    wins           INTEGER DEFAULT 0,
-    kos            INTEGER DEFAULT 0,
-    lines_sent     INTEGER DEFAULT 0,
-    lines_received INTEGER DEFAULT 0,
-    lines_cleared  INTEGER DEFAULT 0,
-    best_lpm       REAL    DEFAULT 0,
-    total_seconds  INTEGER DEFAULT 0
-  );
-`);
-
-const stmts = {
-  getUser:     db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE'),
-  claimUser:   db.prepare('INSERT OR IGNORE INTO users (username) VALUES (?)'),
-  insertStats: db.prepare('INSERT OR IGNORE INTO stats (user_id) VALUES (?)'),
-  getStats:    db.prepare(`
-    SELECT u.username, s.* FROM users u
-    JOIN stats s ON s.user_id = u.id
-    WHERE u.username = ? COLLATE NOCASE`),
-  updateStats: db.prepare(`
-    UPDATE stats SET
-      games_played   = games_played   + @gp,
-      wins           = wins           + @wins,
-      kos            = kos            + @kos,
-      lines_sent     = lines_sent     + @ls,
-      lines_received = lines_received + @lr,
-      lines_cleared  = lines_cleared  + @lc,
-      best_lpm       = MAX(best_lpm,   @lpm),
-      total_seconds  = total_seconds  + @secs
-    WHERE user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`),
-  leaderboard: db.prepare(`
-    SELECT u.username, s.wins, s.kos, s.lines_sent, s.lines_cleared,
-           s.games_played, s.best_lpm
-    FROM users u JOIN stats s ON s.user_id = u.id
-    ORDER BY s.wins DESC, s.kos DESC LIMIT 20`)
-};
+function loadDB() {
+  try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); }
+  catch(e) { return { users: {}, stats: {} }; }
+}
+function saveDB(db) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+}
 
 // ── App ───────────────────────────────────────────────────────────
 const app    = express();
@@ -65,63 +27,70 @@ const io     = new Server(server);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'tetris-friends-dev-secret',
+  secret: process.env.SESSION_SECRET || 'tetris-friends-secret',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
 }));
 
-// ── Auth — username only, no password ────────────────────────────
-// Claim: creates profile if name is new, logs in if it exists
+// ── Auth routes ───────────────────────────────────────────────────
 app.post('/auth/claim', (req, res) => {
   const { username } = req.body || {};
   if (!username) return res.json({ ok: false, error: 'Enter a username' });
   const u = username.trim();
-  if (u.length < 2 || u.length > 16) return res.json({ ok: false, error: 'Username must be 2–16 chars' });
+  if (u.length < 2 || u.length > 16) return res.json({ ok: false, error: 'Username must be 2-16 chars' });
   if (!/^[a-zA-Z0-9_]+$/.test(u)) return res.json({ ok: false, error: 'Letters, numbers and _ only' });
 
-  // Create if new, reuse if exists
-  stmts.claimUser.run(u);
-  const user = stmts.getUser.get(u);
-  stmts.insertStats.run(user.id);
-
-  const isNew = (Date.now()/1000 - user.created_at) < 5; // created in last 5s
-  req.session.username = user.username;
-  res.json({ ok: true, username: user.username, isNew });
+  const db = loadDB();
+  const key = u.toLowerCase();
+  const isNew = !db.users[key];
+  if (isNew) {
+    db.users[key] = { username: u, created: Date.now() };
+    db.stats[key] = { games_played:0, wins:0, kos:0, lines_sent:0, lines_received:0, lines_cleared:0, best_lpm:0, total_seconds:0 };
+    saveDB(db);
+  }
+  req.session.username = db.users[key].username;
+  res.json({ ok: true, username: db.users[key].username, isNew });
 });
 
-app.post('/auth/logout', (req, res) => {
-  req.session.destroy();
-  res.json({ ok: true });
-});
+app.post('/auth/logout', (req, res) => { req.session.destroy(); res.json({ ok: true }); });
+app.get('/auth/me', (req, res) => res.json({ username: req.session.username || null }));
 
-app.get('/auth/me', (req, res) => {
-  res.json({ username: req.session.username || null });
-});
-
-// ── Stats ─────────────────────────────────────────────────────────
 app.get('/stats/:username', (req, res) => {
-  const s = stmts.getStats.get(req.params.username);
-  if (!s) return res.json({ ok: false, error: 'Profile not found' });
-  res.json({ ok: true, stats: s });
+  const db = loadDB();
+  const key = req.params.username.toLowerCase();
+  const u = db.users[key];
+  const s = db.stats[key];
+  if (!u || !s) return res.json({ ok: false, error: 'Not found' });
+  res.json({ ok: true, stats: { username: u.username, ...s } });
 });
 
 app.get('/leaderboard', (_, res) => {
-  res.json({ ok: true, rows: stmts.leaderboard.all() });
+  const db = loadDB();
+  const rows = Object.keys(db.users).map(key => ({
+    username: db.users[key].username,
+    ...db.stats[key]
+  })).sort((a, b) => b.wins - a.wins || b.kos - a.kos).slice(0, 20);
+  res.json({ ok: true, rows });
 });
 
 app.post('/stats/update', (req, res) => {
   const { username, d } = req.body || {};
   if (!username || !d) return res.json({ ok: false });
-  try {
-    stmts.updateStats.run(
-      { gp: d.gp||0, wins: d.wins||0, kos: d.kos||0,
-        ls: d.ls||0, lr: d.lr||0, lc: d.lc||0,
-        lpm: d.lpm||0, secs: d.secs||0 },
-      username
-    );
-    res.json({ ok: true });
-  } catch(e) { res.json({ ok: false, error: e.message }); }
+  const db = loadDB();
+  const key = username.toLowerCase();
+  if (!db.stats[key]) return res.json({ ok: false, error: 'User not found' });
+  const s = db.stats[key];
+  s.games_played   += d.gp   || 0;
+  s.wins           += d.wins || 0;
+  s.kos            += d.kos  || 0;
+  s.lines_sent     += d.ls   || 0;
+  s.lines_received += d.lr   || 0;
+  s.lines_cleared  += d.lc   || 0;
+  s.best_lpm        = Math.max(s.best_lpm, d.lpm || 0);
+  s.total_seconds  += d.secs || 0;
+  saveDB(db);
+  res.json({ ok: true });
 });
 
 app.get('/', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -144,7 +113,6 @@ function checkWin(room) {
   if (alive.length > 1) return;
   room.state = 'ended';
   const w = alive[0] || null;
-  // Build round summary
   if (!room.roundWins) room.roundWins = {};
   if (w) room.roundWins[w.id] = (room.roundWins[w.id] || 0) + 1;
   const summary = {};
@@ -159,18 +127,30 @@ function checkWin(room) {
     };
   }
   room.lastSummary = summary;
-  room.lastWinnerId = w?.id || null;
   io.to(room.code).emit('game-over', {
     winnerId: w?.id || null, winnerName: w?.name || 'Nobody', summary
   });
+}
+
+function saveStats(username, pStats, isWin, startTime) {
+  if (!username || !pStats) return;
+  const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
+  const lpm = elapsed > 0 ? Math.round((pStats.linesCleared || 0) / (elapsed / 60) * 10) / 10 : 0;
+  fetch(`http://localhost:${process.env.PORT || 3000}/stats/update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, d: {
+      gp: 1, wins: isWin ? 1 : 0, kos: pStats.kos || 0,
+      ls: pStats.linesSent || 0, lr: pStats.linesReceived || 0,
+      lc: pStats.linesCleared || 0, lpm, secs: elapsed
+    }})
+  }).catch(() => {});
 }
 
 io.on('connection', socket => {
   let room = null, myName = 'Player', myUsername = null;
 
   function enter(r) {
-    room = r;
-    socket.join(r.code);
+    room = r; socket.join(r.code);
     r.players.set(socket.id, {
       id: socket.id, name: myName, alive: true, username: myUsername,
       stats: { kos:0, linesSent:0, linesReceived:0, linesCleared:0 }
@@ -178,21 +158,17 @@ io.on('connection', socket => {
   }
 
   socket.on('create-room', ({ name, username }) => {
-    myName = (name||'Player').slice(0, 16);
-    myUsername = username || null;
+    myName = (name||'Player').slice(0,16); myUsername = username || null;
     const code = mkCode();
-    const r = { code, host: socket.id, state: 'lobby', players: new Map(),
-                startTime: null, roundWins: {}, lastSummary: null };
-    rooms.set(code, r);
-    enter(r);
+    const r = { code, host: socket.id, state: 'lobby', players: new Map(), startTime: null, roundWins: {}, lastSummary: null };
+    rooms.set(code, r); enter(r);
     socket.emit('room-created', { code, players: arr(r), isHost: true, hostId: socket.id });
   });
 
   socket.on('join-room', ({ code, name, username }) => {
-    myName = (name||'Player').slice(0, 16);
-    myUsername = username || null;
+    myName = (name||'Player').slice(0,16); myUsername = username || null;
     const r = rooms.get((code||'').toUpperCase());
-    if (!r)                  return socket.emit('error-msg', 'Room not found');
+    if (!r) return socket.emit('error-msg', 'Room not found');
     if (r.state !== 'lobby') return socket.emit('error-msg', 'Game in progress');
     if (r.players.size >= 4) return socket.emit('error-msg', 'Room full (max 4)');
     enter(r);
@@ -202,8 +178,7 @@ io.on('connection', socket => {
 
   socket.on('start-game', () => {
     if (!room || room.host !== socket.id || room.state !== 'lobby') return;
-    room.state = 'playing';
-    room.startTime = Date.now();
+    room.state = 'playing'; room.startTime = Date.now();
     for (const p of room.players.values()) {
       p.alive = true;
       p.stats = { kos:0, linesSent:0, linesReceived:0, linesCleared:0 };
@@ -232,25 +207,12 @@ io.on('connection', socket => {
     if (me?.stats) me.stats.linesCleared = total;
   });
 
-  function saveStats(username, pStats, isWin) {
-    if (!username || !pStats) return;
-    const elapsed = room?.startTime ? Math.round((Date.now() - room.startTime) / 1000) : 0;
-    const lpm = elapsed > 0 ? Math.round((pStats.linesCleared / (elapsed / 60)) * 10) / 10 : 0;
-    fetch(`http://localhost:${process.env.PORT || 3000}/stats/update`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, d: {
-        gp: 1, wins: isWin ? 1 : 0, kos: pStats.kos || 0,
-        ls: pStats.linesSent || 0, lr: pStats.linesReceived || 0,
-        lc: pStats.linesCleared || 0, lpm, secs: elapsed
-      }})
-    }).catch(() => {});
-  }
-
-  socket.on('player-dead', (data) => { const kos = (data||{}).kos;
+  socket.on('player-dead', (data) => {
+    const kos = (data||{}).kos;
     if (!room) return;
     const p = room.players.get(socket.id);
     if (p) { p.alive = false; if (p.stats) p.stats.kos = kos || 0; }
-    saveStats(p?.username, p?.stats, false);
+    saveStats(p?.username, p?.stats, false, room.startTime);
     socket.to(room.code).emit('player-eliminated', { id: socket.id });
     checkWin(room);
   });
@@ -259,7 +221,7 @@ io.on('connection', socket => {
     if (!room) return;
     const p = room.players.get(socket.id);
     if (p?.stats) p.stats.kos = kos || p.stats.kos;
-    saveStats(p?.username, p?.stats, true);
+    saveStats(p?.username, p?.stats, true, room.startTime);
   });
 
   socket.on('return-to-lobby', () => {
@@ -267,9 +229,7 @@ io.on('connection', socket => {
     room.state = 'lobby';
     for (const p of room.players.values()) p.alive = true;
     io.to(room.code).emit('returned-to-lobby', {
-      players: arr(room),
-      summary: room.lastSummary || null,
-      roundWins: room.roundWins || {}
+      players: arr(room), summary: room.lastSummary || null, roundWins: room.roundWins || {}
     });
   });
 
