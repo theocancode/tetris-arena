@@ -116,6 +116,53 @@ input[type=text]:focus{border-color:var(--accent);}
   padding:8px 18px;font-size:0.75rem;letter-spacing:0.18em;color:var(--accent);
   z-index:200;pointer-events:none;opacity:0;transition:opacity .2s;}
 #toast.show{opacity:1;}
+
+/* ── Account / Stats ─────────────────────────────────────────────── */
+.auth-tabs { display:flex; gap:0; margin-bottom:16px; }
+.auth-tab { flex:1; padding:8px; background:rgba(255,255,255,0.03); border:1px solid var(--border);
+  color:var(--muted); font-family:var(--mono); font-size:0.72rem; letter-spacing:0.15em;
+  text-transform:uppercase; cursor:pointer; transition:all .15s; }
+.auth-tab:first-child { border-radius:6px 0 0 6px; }
+.auth-tab:last-child  { border-radius:0 6px 6px 0; border-left:none; }
+.auth-tab.active { background:rgba(0,212,255,0.12); border-color:var(--accent); color:var(--accent); }
+.auth-panel { display:none; flex-direction:column; gap:10px; }
+.auth-panel.active { display:flex; }
+.auth-skip { text-align:center; font-size:0.65rem; color:var(--muted); cursor:pointer; letter-spacing:0.2em; margin-top:4px; }
+.auth-skip:hover { color:var(--accent); }
+.logged-in-bar { display:flex; align-items:center; gap:10px; padding:8px 12px;
+  background:rgba(0,212,255,0.06); border:1px solid rgba(0,212,255,0.2);
+  border-radius:6px; font-size:0.75rem; }
+.logged-in-name { flex:1; color:var(--accent); font-weight:bold; }
+.logged-out-note { font-size:0.65rem; color:var(--muted); letter-spacing:0.15em; text-align:center; }
+
+/* Stats screen */
+#stats-screen { flex-direction:column; gap:0; }
+.stats-card { background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:28px 32px; width:500px; display:flex; flex-direction:column; gap:16px; }
+.stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.stat-box { background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px;
+  padding:12px 14px; }
+.stat-label { font-size:0.62rem; color:var(--muted); letter-spacing:0.2em; text-transform:uppercase; margin-bottom:4px; }
+.stat-value { font-family:var(--title); font-size:1.4rem; font-weight:700; color:#fff; }
+.stat-value.accent { color:var(--accent); }
+.leaderboard-row { display:flex; align-items:center; gap:10px; padding:6px 10px;
+  border-bottom:1px solid var(--border); font-size:0.78rem; }
+.leaderboard-row:last-child { border-bottom:none; }
+.lb-rank { width:24px; color:var(--muted); font-size:0.65rem; }
+.lb-rank.gold { color:#ffd700; font-weight:bold; }
+.lb-rank.silver { color:#aaa; font-weight:bold; }
+.lb-rank.bronze { color:#cd7f32; font-weight:bold; }
+.lb-name { flex:1; }
+.lb-stat { color:var(--muted); font-size:0.7rem; }
+.tab-bar { display:flex; gap:0; }
+.tab-btn { flex:1; padding:7px; background:rgba(255,255,255,0.03); border:1px solid var(--border);
+  color:var(--muted); font-family:var(--mono); font-size:0.65rem; letter-spacing:0.12em;
+  text-transform:uppercase; cursor:pointer; }
+.tab-btn:first-child { border-radius:6px 0 0 6px; }
+.tab-btn:last-child  { border-radius:0 6px 6px 0; border-left:none; }
+.tab-btn.active { background:rgba(0,212,255,0.1); color:var(--accent); border-color:var(--accent); }
+.tab-content { display:none; }
+.tab-content.active { display:block; }
 </style>
 </head>
 <body>
@@ -133,7 +180,15 @@ input[type=text]:focus{border-color:var(--accent);}
       <label>YOUR NAME</label>
       <input type="text" id="inp-name" maxlength="16" placeholder="Player">
     </div>
-    <button class="btn btn-primary" id="btn-create">Create Room</button>
+    <div id="auth-bar">
+    <div class="logged-out-note" id="not-logged-note">Play as guest or <span style="color:var(--accent);cursor:pointer" id="open-auth-link">sign in</span> to track stats</div>
+    <div class="logged-in-bar hidden" id="logged-in-bar">
+      <span class="logged-in-name" id="logged-in-name"></span>
+      <button class="btn-ghost" style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);cursor:pointer;font-family:var(--mono);font-size:0.65rem;color:var(--muted)" id="btn-view-stats">MY STATS</button>
+      <button class="btn-ghost" style="padding:4px 10px;border-radius:4px;border:1px solid var(--border);cursor:pointer;font-family:var(--mono);font-size:0.65rem;color:var(--muted)" id="btn-logout">LOGOUT</button>
+    </div>
+  </div>
+  <button class="btn btn-primary" id="btn-create">Create Room</button>
     <div class="divider">OR</div>
     <div>
       <label>ROOM CODE</label>
@@ -192,7 +247,7 @@ input[type=text]:focus{border-color:var(--accent);}
 
 // ── ENGINE ────────────────────────────────────────────────
 
-const COLS = 10, ROWS = 20;
+const COLS = 10, ROWS = 22, VISIBLE_ROWS = 20; // 2 buffer rows above visible
 const TYPES = ['I','O','T','S','Z','J','L'];
 const NEXT_COUNT = 5;
 
@@ -237,7 +292,10 @@ const KICKS_I = [
 const KICK_IDX = {'01':0,'10':1,'12':2,'21':3,'23':4,'32':5,'30':6,'03':7};
 
 // Line-clear -> garbage lines sent (Tetris Friends style)
+// TF exact garbage table
 const GARBAGE_TABLE = { 1:0, 2:1, 3:2, 4:4 };
+// TF combo bonus table (index = combo count, 0-indexed)
+const COMBO_BONUS = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5];
 
 function shuffle(a) {
   for (let i = a.length-1; i > 0; i--) {
@@ -290,14 +348,17 @@ class TetrisEngine {
   _spawn() {
     this.holdUsed = false;
     const p = this._mkPiece(this._deq());
-    // Spawn just above visible board
-    p.row = p.type === 'I' ? -2 : -1;
-    // Centre col
+    // Spawn in buffer zone (rows 0-1 of 22-row board = above visible area)
+    p.row = p.type === 'I' ? 0 : 1;
     p.col = Math.floor((COLS - p.shape[0].length) / 2);
+    // Try spawning - if blocked try shifting up (leeway like TF)
     if (!this._fits(p.shape, p.row, p.col)) {
-      this.isDead = true;
-      if (this.onDead) this.onDead();
-      return;
+      p.row--;
+      if (!this._fits(p.shape, p.row, p.col)) {
+        this.isDead = true;
+        if (this.onDead) this.onDead();
+        return;
+      }
     }
     this.piece = p;
     this.lockMoves = 0;
@@ -308,7 +369,7 @@ class TetrisEngine {
       for (let c = 0; c < shape[r].length; c++) {
         if (!shape[r][c]) continue;
         const nr = row + r, nc = col + c;
-        if (nr >= ROWS || nc < 0 || nc >= COLS) return false;
+        if (nr >= ROWS || nc < 0 || nc >= COLS) return false; // nr can be negative (buffer)
         if (nr >= 0 && this.board[nr][nc]) return false;
       }
     }
@@ -389,7 +450,8 @@ class TetrisEngine {
     if (cleared > 0) {
       this.combo++;
       // garbage sent
-      const g = (GARBAGE_TABLE[cleared] || 0) + (this.combo > 1 ? this.combo - 1 : 0);
+      const comboIdx = Math.min(this.combo, COMBO_BONUS.length - 1);
+      const g = (GARBAGE_TABLE[cleared] || 0) + COMBO_BONUS[comboIdx];
       if (g > 0 && this.onSendGarbage) this.onSendGarbage(g);
     } else {
       this.combo = 0;
@@ -494,6 +556,7 @@ if (typeof window !== 'undefined') {
   window.GRAVITY = GRAVITY;
   window.COLS    = COLS;
   window.ROWS    = ROWS;
+  window.VISIBLE_ROWS = VISIBLE_ROWS;
   window.NEXT_COUNT = NEXT_COUNT;
 }
 
@@ -583,8 +646,10 @@ function drawPieceInBox(ctx,type,ox,oy,bw,bh,csz){
 }
 
 function renderMain(ctx,engine,x,y,particles){
-  const board=engine.serialiseBoardWithPiece();
-  drawBoard(ctx,board,x,y,BLOCK,10,20);
+  // Only render the bottom VISIBLE_ROWS rows (skip 2 buffer rows at top)
+  const fullBoard=engine.serialiseBoardWithPiece();
+  const board=fullBoard.slice(ROWS-VISIBLE_ROWS);
+  drawBoard(ctx,board,x,y,BLOCK,10,VISIBLE_ROWS);
   if(particles){particles.update();particles.draw(ctx);}
 }
 
@@ -1285,5 +1350,48 @@ SoundSystem.init();
 
 })();
 </script>
+
+<!-- Auth Modal -->
+<div id="auth-modal" class="overlay hidden">
+  <div class="card" style="width:360px">
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login">Login</button>
+      <button class="auth-tab" id="tab-register">Register</button>
+    </div>
+    <div class="auth-panel active" id="panel-login">
+      <div><label>USERNAME</label><input type="text" id="auth-username" maxlength="16" placeholder="your name"></div>
+      <div><label>PASSWORD</label><input type="password" id="auth-password" placeholder="password"></div>
+      <button class="btn btn-primary" id="btn-do-login">LOGIN</button>
+      <p class="error-msg" id="auth-err"></p>
+    </div>
+    <div class="auth-panel" id="panel-register">
+      <div><label>USERNAME</label><input type="text" id="reg-username" maxlength="16" placeholder="pick a name"></div>
+      <div><label>PASSWORD</label><input type="password" id="reg-password" placeholder="min 4 chars"></div>
+      <button class="btn btn-primary" id="btn-do-register">CREATE ACCOUNT</button>
+      <p class="error-msg" id="reg-err"></p>
+    </div>
+    <p class="auth-skip" id="btn-close-auth">PLAY AS GUEST INSTEAD</p>
+  </div>
+</div>
+
+<!-- Stats Screen -->
+<div id="stats-screen" class="screen hidden">
+  <div class="stats-card">
+    <div style="display:flex;align-items:center;gap:12px">
+      <h2 style="font-family:var(--title);font-size:1rem;letter-spacing:0.2em;flex:1" id="stats-title">STATS</h2>
+      <button class="btn-ghost" style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:0.65rem;color:var(--muted)" id="btn-close-stats">BACK</button>
+    </div>
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="my-stats">MY STATS</button>
+      <button class="tab-btn" data-tab="leaderboard">LEADERBOARD</button>
+    </div>
+    <div class="tab-content active" id="tab-my-stats">
+      <div class="stats-grid" id="stats-grid"></div>
+    </div>
+    <div class="tab-content" id="tab-leaderboard">
+      <div id="leaderboard-list"></div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
