@@ -1376,7 +1376,11 @@ class GameManager {
     if (this._comboFlashAlpha > 0)
       this._comboFlashAlpha = Math.max(0, this._comboFlashAlpha - 0.025);
 
-    this._draw();
+    try {
+      this._draw();
+    } catch(e) {
+      console.error('Draw error:', e);
+    }
     this._raf = requestAnimationFrame(t => this._loop(t));
   }
 
