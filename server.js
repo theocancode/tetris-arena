@@ -132,8 +132,26 @@ function checkWin(room) {
   if (alive.length > 1) return;
   room.state = 'ended';
   const w = alive[0] || null;
+  // Build round summary for all players
+  const summary = {};
+  for (const [id, p] of room.players) {
+    summary[id] = {
+      name:    p.name,
+      wins:    (room.roundWins?.[id] || 0),
+      linesSent:     p.stats?.linesSent     || 0,
+      linesReceived: p.stats?.linesReceived || 0,
+      linesCleared:  p.stats?.linesCleared  || 0,
+      kos:           p.stats?.kos           || 0,
+    };
+  }
+  // Track cumulative round wins
+  if (!room.roundWins) room.roundWins = {};
+  if (w) room.roundWins[w.id] = (room.roundWins[w.id] || 0) + 1;
+  // Add updated wins to summary
+  if (w) summary[w.id].wins = room.roundWins[w.id];
+  room.lastSummary = summary;
   io.to(room.code).emit('game-over', {
-    winnerId: w?.id || null, winnerName: w?.name || 'Nobody'
+    winnerId: w?.id || null, winnerName: w?.name || 'Nobody', summary
   });
 }
 
@@ -248,7 +266,11 @@ io.on('connection', socket => {
     if (!room || room.host !== socket.id) return;
     room.state = 'lobby';
     for (const p of room.players.values()) p.alive = true;
-    io.to(room.code).emit('returned-to-lobby', { players: arr(room) });
+    io.to(room.code).emit('returned-to-lobby', { 
+      players: arr(room),
+      summary: room.lastSummary || null,
+      roundWins: room.roundWins || {}
+    });
   });
 
   socket.on('disconnect', () => {

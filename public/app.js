@@ -209,8 +209,29 @@ socket.on('returned-to-lobby', function(d){
   if (gm){ gm.stop(); gm=null; }
   hideOverlay();
   $('lobby-code').textContent=roomCode;
-  rebuildPlayerList(); showScreen('lobby');
+  rebuildPlayerList();
+  if (d.summary) showRoundSummary(d.summary, d.roundWins || {});
+  showScreen('lobby');
 });
+
+function showRoundSummary(summary, roundWins) {
+  var box = $('round-summary');
+  var rows = $('summary-rows');
+  if (!box || !rows) return;
+  var entries = Object.values(summary).sort(function(a,b){ return (roundWins[b.id]||b.wins||0) - (roundWins[a.id]||a.wins||0); });
+  rows.innerHTML = entries.map(function(p) {
+    var wins = roundWins[p.name] || p.wins || 0;
+    return '<div class="summary-row">' +
+      '<span class="summary-crown">' + (wins > 0 ? '👑' : '  ') + '</span>' +
+      '<span class="summary-name">' + p.name + '</span>' +
+      '<span class="summary-stat">Wins: <span>' + wins + '</span></span>' +
+      '<span class="summary-stat">KOs: <span>' + (p.kos||0) + '</span></span>' +
+      '<span class="summary-stat">Sent: <span>' + (p.linesSent||0) + '</span></span>' +
+      '<span class="summary-stat">Got: <span>' + (p.linesReceived||0) + '</span></span>' +
+    '</div>';
+  }).join('');
+  box.style.display = 'block';
+}
 
 // ── Game ──────────────────────────────────────────────────────────
 function startGame() {

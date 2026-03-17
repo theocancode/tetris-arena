@@ -16,7 +16,7 @@ const SoundSystem = (() => {
   const FILE_MAP = {
     // ── Gameplay ─────────────────────────────────────────────────
     move:     ['fx_unmve.mp3'],
-    rotate:   ['fx_rotationlock.mp3'],
+    rotate:   ['fx_rta01.mp3'],
     drop:     ['fx_hrddp.mp3'],
     lock:     ['fx_lck01.mp3'],
     fall:     ['fx_fall.mp3'],       // soft-drop landing sound
